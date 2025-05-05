@@ -36,6 +36,58 @@ cd calendar-sse-mcp
 pip install -e .
 ```
 
+### Using uv
+
+You can install directly using [uv](https://github.com/astral-sh/uv), a fast Python package installer:
+
+```bash
+uv pip install git+https://github.com/HongpengM/calendar-sse-mcp.git
+```
+
+Note: This package will be available on PyPI in the future.
+
+```bash 
+uv pip install calendar-sse-mcp
+```
+
+## Claude Configuration
+
+To add this calendar service to Claude, create the following JSON configuration:
+
+```json
+{
+  "schema_version": "v1",
+  "name": "Calendar",
+  "description": "Access and manage events in macOS Calendar.app",
+  "provider_uri": "http://localhost:3000",
+  "provider_type": "mcp_server",
+  "tools": [
+    {
+      "name": "list_all_calendars",
+      "description": "List all available calendars in Calendar.app"
+    },
+    {
+      "name": "search_events",
+      "description": "Search for events in Calendar.app by query, calendar name, and date range"
+    },
+    {
+      "name": "create_calendar_event",
+      "description": "Create a new event in Calendar.app"
+    },
+    {
+      "name": "update_calendar_event",
+      "description": "Update an existing event in Calendar.app"
+    },
+    {
+      "name": "delete_calendar_event",
+      "description": "Delete an event from Calendar.app"
+    }
+  ]
+}
+```
+
+Save this as `calendar-mcp.json` and add it to Claude in your settings.
+
 ## Command-line Usage
 
 The package provides a comprehensive command-line interface:
@@ -90,6 +142,9 @@ calendar-mcp agent check --show-logs
 
 # Uninstall the Launch Agent
 calendar-mcp agent uninstall
+
+# Reinstall the Launch Agent (uninstall and create again)
+calendar-mcp agent uninstall && calendar-mcp agent create --load
 ```
 
 ### Managing Calendar Events
@@ -124,6 +179,24 @@ The first time you run the server and it attempts to access Calendar.app, macOS 
 2. To check or modify permissions later, go to:
    - System Settings > Privacy & Security > Automation
    - Ensure Python/Terminal has permissions to control Calendar.app
+
+## Privacy Warning and Disclaimer
+
+**IMPORTANT**: This software requires full access to your macOS Calendar.app and all its data. Please be aware of the following:
+
+- When you run this software, macOS will prompt you to grant Calendar.app access to `uv`, Python, or your terminal application
+- Granting this permission gives the application complete read and write access to ALL your calendar data
+- All calendar events, including potentially sensitive information (meetings, appointments, personal events), will be accessible to this software
+- Any application given this access could potentially read, modify, or delete your calendar events
+
+By installing and using this software, you acknowledge:
+
+1. You understand the scope of permissions being granted
+2. You accept the potential privacy and security risks involved
+3. You are responsible for reviewing the source code or trusting the developer
+4. No warranty is provided regarding security, privacy, or data integrity
+
+If you're uncomfortable with these permissions, please do not proceed with installation.
 
 ## API Reference
 

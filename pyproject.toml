@@ -1,0 +1,29 @@
+[project]
+name = "calendar-sse-mcp"
+version = "0.1.0"
+description = "A Model Context Protocol server for macOS Calendar.app"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.7.1",
+    "starlette>=0.46.2",
+    "python-dotenv>=1.0.0",
+    "pyobjc-framework-EventKit>=9.0",
+    "pyobjc-core>=9.0",
+    "pyobjc-framework-Cocoa>=9.0",
+    "requests>=2.32.3",
+    "sseclient-py>=1.8.0",
+    "pydantic>=2.0.0",
+    "dateparser>=1.2.0",
+]
+
+[project.scripts]
+calendar-mcp = "calendar_sse_mcp.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.rye]
+managed = true
+dev-dependencies = []

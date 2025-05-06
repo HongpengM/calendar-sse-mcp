@@ -21,7 +21,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for in
 ## Requirements
 
 - macOS (tested on macOS 14 Sonoma and above)
-- Python 3.12 or newer
+- Python 3.10 or newer
 - Calendar.app with at least one calendar set up
 
 ## Installation

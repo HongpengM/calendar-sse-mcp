@@ -135,12 +135,13 @@ class CalendarStore:
                 
         return None
 
-    def _date_to_nsdate(self, date_str: Optional[str] = None) -> NSDate:
+    def _date_to_nsdate(self, date_str: Optional[str] = None, is_end_date: bool = False) -> NSDate:
         """
         Convert a date string to NSDate.
         
         Args:
             date_str: Date string in YYYY-MM-DD format
+            is_end_date: Whether this is an end date (should be set to end of day)
             
         Returns:
             NSDate object
@@ -150,7 +151,33 @@ class CalendarStore:
             
         try:
             # Parse 'YYYY-MM-DD' format
-            date_obj = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+            if "T" in date_str:
+                # If date already has time component, parse as is
+                if ":" in date_str:
+                    # Has hours and minutes
+                    if date_str.count(":") == 1:
+                        # Only hours and minutes, add seconds
+                        date_str = f"{date_str}:00"
+                    date_format = "%Y-%m-%dT%H:%M:%S"
+                else:
+                    # Just the T separator, add time
+                    if is_end_date:
+                        date_str = f"{date_str}23:59:59"
+                    else:
+                        date_str = f"{date_str}00:00:00"
+                    date_format = "%Y-%m-%dT%H:%M:%S"
+            else:
+                # Just date, no time component
+                if is_end_date:
+                    # For end dates, set to end of day
+                    date_str = f"{date_str}T23:59:59"
+                else:
+                    # For start dates, set to beginning of day
+                    date_str = f"{date_str}T00:00:00"
+                date_format = "%Y-%m-%dT%H:%M:%S"
+                
+            date_obj = datetime.datetime.strptime(date_str, date_format)
+            
             # Convert to NSDate (seconds since reference date)
             time_interval = date_obj.timestamp()
             return NSDate.dateWithTimeIntervalSince1970_(time_interval)
@@ -171,8 +198,8 @@ class CalendarStore:
         
         Args:
             calendar_name: Optional name of calendar to get events from
-            start_date: Optional start date in format 'YYYY-MM-DD'
-            end_date: Optional end date in format 'YYYY-MM-DD'
+            start_date: Optional start date in format 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS'
+            end_date: Optional end date in format 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS'
             
         Returns:
             List of event dictionaries
@@ -181,24 +208,34 @@ class CalendarStore:
             CalendarStoreError: If not authorized or calendar not found
         """
         self._check_authorization()
-            
-        # Convert dates to NSDate objects
-        ns_start_date = self._date_to_nsdate(start_date)
+        
+        # Convert start date to NSDate
+        ns_start_date = self._date_to_nsdate(start_date, is_end_date=False)
         
         # If no end date is provided, default to 7 days from start
         if not end_date:
             if start_date:
-                # 7 days from start date
-                date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
-                end_obj = date_obj + datetime.timedelta(days=7)
-                ns_end_date = NSDate.dateWithTimeIntervalSince1970_(end_obj.timestamp())
+                # Try to parse the start date
+                try:
+                    # Get the date part only if it has a time component
+                    date_part = start_date.split("T")[0] if "T" in start_date else start_date
+                    date_obj = datetime.datetime.strptime(date_part, "%Y-%m-%d")
+                    # Add 7 days and set to end of day
+                    end_obj = date_obj + datetime.timedelta(days=7)
+                    end_obj = end_obj.replace(hour=23, minute=59, second=59)
+                    # Convert to NSDate
+                    ns_end_date = NSDate.dateWithTimeIntervalSince1970_(end_obj.timestamp())
+                except ValueError:
+                    # Fallback to 7 days from now
+                    time_interval = 7 * 24 * 60 * 60  # 7 days in seconds
+                    ns_end_date = NSDate.dateWithTimeIntervalSinceNow_(time_interval)
             else:
                 # 7 days from now
                 time_interval = 7 * 24 * 60 * 60  # 7 days in seconds
                 ns_end_date = NSDate.dateWithTimeIntervalSinceNow_(time_interval)
         else:
-            # Use provided end date
-            ns_end_date = self._date_to_nsdate(end_date)
+            # Use provided end date, making sure it's set to end of day
+            ns_end_date = self._date_to_nsdate(end_date, is_end_date=True)
             
         # Get the specified calendar or all calendars
         calendar_obj = None
@@ -284,7 +321,7 @@ class CalendarStore:
         Parse ISO 8601 date string to NSDate.
         
         Args:
-            date_str: Date string in format "yyyy-MM-ddTHH:mm:ss"
+            date_str: Date string in format "yyyy-MM-dd" or "yyyy-MM-ddTHH:mm:ss"
             
         Returns:
             Tuple of (NSDate object, success)
@@ -293,15 +330,34 @@ class CalendarStore:
             ValueError: If date string is not in the correct format
         """
         try:
-            # Parse ISO format dates
-            dt = datetime.datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S")
+            # Check which format we're dealing with
+            if "T" in date_str:
+                # Has time component
+                if ":" in date_str:
+                    # Has hours and minutes
+                    if date_str.count(":") == 1:
+                        # Only hours and minutes, add seconds
+                        date_str = f"{date_str}:00"
+                    date_format = "%Y-%m-%dT%H:%M:%S"
+                else:
+                    # Just the T separator, add time
+                    date_str = f"{date_str}00:00:00"
+                    date_format = "%Y-%m-%dT%H:%M:%S"
+            else:
+                # Only date, no time - use beginning of day
+                date_str = f"{date_str}T00:00:00"
+                date_format = "%Y-%m-%dT%H:%M:%S"
+                
+            # Parse the appropriately formatted date
+            dt = datetime.datetime.strptime(date_str, date_format)
+            
             # Convert to NSDate
             ns_date = NSDate.dateWithTimeIntervalSince1970_(dt.timestamp())
             return ns_date, True
         except ValueError as e:
             if not self.quiet:
-                print(f"Invalid date format: {e}", file=sys.stderr)
-            raise ValueError(f"Invalid date format: {e}")
+                print(f"Invalid date format: {date_str} - {e}", file=sys.stderr)
+            raise ValueError(f"Invalid date format: {date_str} - {e}")
 
     def create_event(
         self,

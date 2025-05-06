@@ -20,6 +20,8 @@ project_root = script_dir.parent
 
 # Path to the pyproject.toml file
 pyproject_path = project_root / "pyproject.toml"
+# Path to the __init__.py file
+init_path = project_root / "src" / "calendar_sse_mcp" / "__init__.py"
 
 def bump_version(bump_type="patch"):
     """Bump the version in pyproject.toml
@@ -63,9 +65,37 @@ def bump_version(bump_type="patch"):
     with open(pyproject_path, "w") as f:
         f.write(new_content)
     
+    # Also update the version in __init__.py
+    update_init_version(new_version)
+    
     old_version = ".".join(match.groups())
     print(f"Version updated: {old_version} -> {new_version}")
     return new_version
+
+def update_init_version(new_version):
+    """Update the __version__ in __init__.py
+    
+    Args:
+        new_version: New version string
+    """
+    # Check if __init__.py exists
+    if not init_path.exists():
+        print(f"Warning: {init_path} does not exist, cannot update __version__")
+        return
+    
+    # Read the current __init__.py
+    with open(init_path, "r") as f:
+        init_content = f.read()
+    
+    # Replace the version line
+    version_pattern = re.compile(r'__version__\s*=\s*"[^"]+"')
+    new_init_content = version_pattern.sub(f'__version__ = "{new_version}"', init_content)
+    
+    # Write back the updated content
+    with open(init_path, "w") as f:
+        f.write(new_init_content)
+    
+    print(f"Updated __version__ in {init_path}")
 
 def clear_dist_directory():
     """Clear the dist/ directory"""

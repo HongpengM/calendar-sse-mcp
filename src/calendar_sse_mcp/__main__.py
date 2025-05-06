@@ -300,8 +300,9 @@ def delete_event_command(args: argparse.Namespace) -> None:
 def search_events_command(args: argparse.Namespace) -> None:
     """Search for events"""
     try:
-        # Get calendar from args or env if not provided
-        calendar_name = args.calendar or get_env("DEFAULT_CALENDAR", None)
+        # Get calendar from args, but don't default to DEFAULT_CALENDAR
+        # This allows searching across all calendars when not specified
+        calendar_name = args.calendar
         
         # Create a CalendarStore instance
         store = calendar_store.CalendarStore(quiet=args.json)

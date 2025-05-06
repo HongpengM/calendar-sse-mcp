@@ -120,6 +120,13 @@ def get_calendar_events_by_date_range(
         JSON string containing events
     """
     try:
+        # Handle date ranges by adjusting time components
+        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
+            start_date = f"{start_date}T00:00:00"
+            
+        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
+            end_date = f"{end_date}T23:59:59"
+            
         store = CalendarStore(quiet=True)
         events = store.get_events(
             calendar_name=calendar_name,
@@ -204,6 +211,13 @@ def search_events(
         JSON string containing matching events
     """
     try:
+        # Handle date ranges by adjusting time components
+        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
+            start_date = f"{start_date}T00:00:00"
+            
+        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
+            end_date = f"{end_date}T23:59:59"
+            
         store = CalendarStore(quiet=True)
         events = store.get_events(
             calendar_name=calendar_name,
@@ -447,6 +461,13 @@ def search_events_prompt(
         end_date: (Optional) End date in format "yyyy-MM-dd"
     """
     try:
+        # Handle date ranges by adjusting time components
+        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
+            start_date = f"{start_date}T00:00:00"
+            
+        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
+            end_date = f"{end_date}T23:59:59"
+            
         store = CalendarStore(quiet=True)
         events = store.get_events(
             calendar_name=calendar_name,
@@ -686,6 +707,16 @@ def api_get_events_with_dates(calendar_name: str, start_date: str, end_date: str
     try:
         # Parse and validate date range
         start_dt, end_dt = create_date_range(start_date, end_date)
+        
+        # Ensure end_dt is set to end of day (23:59:59) if only date is provided
+        # This is especially important for same-day searches
+        if start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0:
+            # Only modify if it's at the beginning of the day (likely just date was provided)
+            start_dt = start_dt.replace(hour=0, minute=0, second=0)
+            
+        if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
+            # Only modify if it's at the beginning of the day (likely just date was provided)
+            end_dt = end_dt.replace(hour=23, minute=59, second=59)
         
         # Format dates as ISO strings for the calendar store
         start_iso = format_iso(start_dt)

@@ -33,7 +33,7 @@ def get_env(key: str, default: Optional[str] = None) -> Optional[str]:
 def run_server_command(args: argparse.Namespace) -> None:
     """Run the MCP server"""
     host = args.host or get_env("SERVER_HOST", "127.0.0.1")
-    port = args.port or get_env("SERVER_PORT", "3000")
+    port = args.port or get_env("SERVER_PORT", "27212")
     
     # FastMCP doesn't accept host or port as parameters directly
     # Set them through environment variables
@@ -64,7 +64,7 @@ def install_server_command(args: argparse.Namespace) -> None:
 def create_launch_agent_command(args: argparse.Namespace) -> None:
     """Create and install a Launch Agent plist"""
     # Get arguments or defaults
-    port = args.port or int(os.environ.get("SERVER_PORT", "3000"))
+    port = args.port or int(os.environ.get("SERVER_PORT", "27212"))
     logdir = args.logdir or os.environ.get("LOG_DIR", "/tmp")
     agent_name = args.name or os.environ.get("LAUNCH_AGENT_NAME", "com.calendar-sse-mcp")
     auto_load = args.load or os.environ.get("AUTO_LOAD_AGENT", "").lower() == "true"
@@ -551,4 +551,118 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
+
+
+def install_server_main():
+    """
+    Entry point for the install-server command.
+    Handles reinstalling the package and setting up the launch agent.
+    """
+    parser = argparse.ArgumentParser(description="Install calendar-sse-mcp server and Launch Agent")
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    
+    # Install command (default - installs the launch agent)
+    install_parser = subparsers.add_parser("install", help="Install the calendar-sse-mcp server as a launch agent")
+    install_parser.add_argument("--port", type=int, default=27212, help="Server port (default: 27212)")
+    install_parser.add_argument("--logdir", default="/tmp", help="Log directory (default: /tmp)")
+    install_parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    install_parser.add_argument("--no-load", action="store_true", help="Don't load the agent after creation")
+    
+    # Reinstall command (unloads old agent, reinstalls package, reinstalls agent)
+    reinstall_parser = subparsers.add_parser("reinstall", help="Reinstall the calendar-sse-mcp package and launch agent")
+    reinstall_parser.add_argument("--port", type=int, default=27212, help="Server port (default: 27212)")
+    reinstall_parser.add_argument("--logdir", default="/tmp", help="Log directory (default: /tmp)")
+    reinstall_parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    reinstall_parser.add_argument("--no-load", action="store_true", help="Don't load the agent after creation")
+    
+    # Launch agent command (for backward compatibility)
+    launchagent_parser = subparsers.add_parser("launchagent", help="Install the Launch Agent")
+    launchagent_parser.add_argument("--port", type=int, help="Server port")
+    launchagent_parser.add_argument("--logdir", help="Log directory")
+    launchagent_parser.add_argument("--name", help="Launch Agent name")
+    launchagent_parser.add_argument("--load", action="store_true", help="Auto-load the agent")
+    
+    args = parser.parse_args()
+    
+    # If no command provided, default to install
+    if not args.command:
+        args.command = "install"
+        args.port = 27212
+        args.logdir = "/tmp"
+        args.name = "com.calendar-sse-mcp"
+        args.no_load = False
+    
+    # Handle reinstall command - unload agent if it exists, reinstall package, then reinstall agent
+    if args.command == "reinstall":
+        # Try to unload existing launch agent
+        agent_name = args.name or "com.calendar-sse-mcp"
+        print(f"Checking for existing launch agent: {agent_name}")
+        
+        # Uninstall the launch agent if it exists
+        success, message = uninstall_launch_agent(agent_name=agent_name)
+        print(message)
+        
+        # Reinstall the package
+        try:
+            # Check if uv is available
+            if shutil.which("uv"):
+                cmd = ["uv", "pip", "install", "--force-reinstall", "git+https://github.com/HongpengM/calendar-sse-mcp.git"]
+                print("Reinstalling calendar-sse-mcp...")
+                subprocess.run(cmd, check=True)
+                print("Package reinstallation completed successfully!")
+            else:
+                print("Error: uv package manager not found.")
+                print("Please install uv first: https://github.com/astral-sh/uv")
+                sys.exit(1)
+        except subprocess.CalledProcessError as e:
+            print(f"Error during installation: {e}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            sys.exit(1)
+            
+        # Now install the launch agent
+        print(f"Setting up launch agent with port {args.port}...")
+        success, message, plist_path = create_launch_agent(
+            agent_name=args.name,
+            port=args.port,
+            log_dir=args.logdir,
+            auto_load=not args.no_load
+        )
+        
+        print(message)
+        
+        if not success:
+            sys.exit(1)
+    
+    # Handle the install command
+    elif args.command == "install":
+        # Just install the launch agent
+        print(f"Setting up launch agent with port {args.port}...")
+        success, message, plist_path = create_launch_agent(
+            agent_name=args.name,
+            port=args.port,
+            log_dir=args.logdir,
+            auto_load=not args.no_load
+        )
+        
+        print(message)
+        
+        if not success:
+            sys.exit(1)
+    
+    # Handle legacy launchagent command
+    elif args.command == "launchagent":
+        # Setup the launch agent
+        success, message, plist_path = create_launch_agent(
+            agent_name=args.name,
+            port=args.port,
+            log_dir=args.logdir,
+            auto_load=args.load
+        )
+        
+        print(message)
+        
+        if not success:
+            sys.exit(1) 

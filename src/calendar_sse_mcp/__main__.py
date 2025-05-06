@@ -157,12 +157,24 @@ def list_calendars_command(args: argparse.Namespace) -> None:
 def get_events_command(args: argparse.Namespace) -> None:
     """Get events from a calendar"""
     try:
+        # Handle date ranges by adjusting time components
+        start_date = args.start_date
+        end_date = args.end_date
+        
+        # If start_date is provided and doesn't have time component, add beginning of day
+        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
+            start_date = f"{start_date}T00:00:00"
+            
+        # If end_date is provided and doesn't have time component, add end of day
+        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
+            end_date = f"{end_date}T23:59:59"
+            
         # Create a CalendarStore instance
         store = calendar_store.CalendarStore(quiet=args.json)
         events = store.get_events(
             calendar_name=args.calendar,
-            start_date=args.start_date,
-            end_date=args.end_date
+            start_date=start_date,
+            end_date=end_date
         )
         
         if args.json:
@@ -304,12 +316,24 @@ def search_events_command(args: argparse.Namespace) -> None:
         # This allows searching across all calendars when not specified
         calendar_name = args.calendar
         
+        # Handle date ranges by adjusting time components
+        start_date = args.start_date
+        end_date = args.end_date
+        
+        # If start_date is provided and doesn't have time component, add beginning of day
+        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
+            start_date = f"{start_date}T00:00:00"
+            
+        # If end_date is provided and doesn't have time component, add end of day
+        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
+            end_date = f"{end_date}T23:59:59"
+        
         # Create a CalendarStore instance
         store = calendar_store.CalendarStore(quiet=args.json)
         events = store.get_events(
             calendar_name=calendar_name,
-            start_date=args.start_date,
-            end_date=args.end_date
+            start_date=start_date,
+            end_date=end_date
         )
         
         # Filter events by query
@@ -607,8 +631,8 @@ def install_server_main():
         try:
             # Check if uv is available
             if shutil.which("uv"):
-                cmd = ["uv", "pip", "install", "--force-reinstall", "git+https://github.com/HongpengM/calendar-sse-mcp.git"]
-                print("Reinstalling calendar-sse-mcp...")
+                cmd = ["uv", "pip", "install", "--force-reinstall", "calendar-sse-mcp"]
+                print("Reinstalling calendar-sse-mcp from PyPI...")
                 subprocess.run(cmd, check=True)
                 print("Package reinstallation completed successfully!")
             else:

@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any, List, NoReturn, Callable, Union
 
 import dotenv
 
-from . import calendar_store
+from . import calendar_store, __version__
 from .calendar_store import CalendarStoreError
 from .server import mcp
 from .launch_agent import create_launch_agent, check_launch_agent, uninstall_launch_agent
@@ -363,10 +363,17 @@ def search_events_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def show_version():
+    """Display the package version and exit"""
+    print(f"calendar-sse-mcp version {__version__}")
+    sys.exit(0)
+
+
 def main():
     """Main entry point for the CLI"""
     parser = argparse.ArgumentParser(description="Calendar MCP Server CLI")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run", required=True)
+    parser.add_argument("--version", action="store_true", help="Show version information and exit")
+    subparsers = parser.add_subparsers(dest="command", help="Command to run", required=False)
     
     # Server command
     server_parser = subparsers.add_parser("server", help="Run the MCP server")
@@ -565,12 +572,16 @@ def main():
     # Parse arguments
     args = parser.parse_args()
     
-    # Show help if no command is provided
-    if args.command is None:
-        parser.print_help()
-        sys.exit(0)
+    # Show version and exit if --version is provided
+    if hasattr(args, 'version') and args.version:
+        show_version()
     
-    # Run the appropriate function
+    # Ensure a command was provided if not using --version
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+        
+    # Run the corresponding function for the command
     args.func(args)
 
 

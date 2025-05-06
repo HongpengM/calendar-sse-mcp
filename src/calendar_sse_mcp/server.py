@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
 """
 Calendar MCP Server - An MCP server for interacting with macOS Calendar.app
+
+This server provides an interface to Calendar.app on macOS, allowing you to:
+- List available calendars
+- View, create, update, and delete events
+- Search for events by date range
+- Get detailed information about calendars and events
+
+The server uses FastMCP to expose both resources and tools that can be used
+by AI assistants to interact with the user's calendar.
 """
 import datetime
 import json
 import os
 from typing import Dict, List, Optional, Union, Any
+import dateparser
+from datetime import datetime, timedelta
 
 from mcp.server.fastmcp import FastMCP
 
@@ -357,8 +368,6 @@ def delete_calendar_event(event_id: str, calendar_name: str) -> str:
         }, ensure_ascii=False)
 
 
-# Prompts ------------------------------------------------------------------
-
 @mcp.prompt()
 def create_event_prompt(
     calendar_name: str,
@@ -472,6 +481,118 @@ def search_events_prompt(
         return f"Failed to search events: {e}"
     except Exception as e:
         return f"Failed to search events: Unexpected error: {e}"
+
+
+@mcp.tool()
+def get_events_date_range(
+    calendar_name: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    duration: Optional[str] = None
+) -> str:
+    """
+    Get calendar events within a flexible date range with multiple ways to specify the range.
+    
+    Args:
+        calendar_name: Name of the calendar to get events from
+        start_date: Starting date in any format parseable by dateparser (defaults to today)
+        end_date: Ending date in any format parseable by dateparser
+        duration: Duration from start date or before end date, e.g. "3d", "1 week", "1 month"
+                 (default is "3d" if neither end_date nor duration is specified)
+    
+    The function supports three ways to specify a date range:
+    1. start_date only: Returns events from start_date to start_date + 3 days
+    2. start_date + duration: Returns events from start_date to start_date + duration
+    3. end_date + duration: Returns events from end_date - duration to end_date
+    
+    Returns:
+        JSON string containing events in the specified date range
+    """
+    try:
+        # Parse the duration if provided
+        days = 3  # Default duration is 3 days
+        if duration:
+            # Handle different duration formats
+            duration = duration.lower().strip()
+            if duration.endswith('d') or duration.endswith(' day') or duration.endswith(' days'):
+                # Extract the number part of the duration
+                num = ''.join(c for c in duration if c.isdigit())
+                if num:
+                    days = int(num)
+            elif duration.endswith('w') or duration.endswith(' week') or duration.endswith(' weeks'):
+                num = ''.join(c for c in duration if c.isdigit())
+                if num:
+                    days = int(num) * 7
+            elif duration.endswith('m') or duration.endswith(' month') or duration.endswith(' months'):
+                num = ''.join(c for c in duration if c.isdigit())
+                if num:
+                    days = int(num) * 30  # Approximation for months
+        
+        # Determine date range based on provided parameters
+        if end_date and not start_date:
+            # Case: end_date + duration (backwards from end_date)
+            end_dt = dateparser.parse(end_date)
+            if not end_dt:
+                raise ValueError(f"Could not parse end date: {end_date}")
+            start_dt = end_dt - timedelta(days=days)
+        else:
+            # Case: start_date only or start_date + duration
+            if not start_date:
+                start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                start_dt = dateparser.parse(start_date)
+                if not start_dt:
+                    raise ValueError(f"Could not parse start date: {start_date}")
+            
+            if end_date:
+                end_dt = dateparser.parse(end_date)
+                if not end_dt:
+                    raise ValueError(f"Could not parse end date: {end_date}")
+            else:
+                # Use duration if no end_date is provided
+                end_dt = start_dt + timedelta(days=days)
+        
+        # Ensure dates are in correct order
+        if end_dt < start_dt:
+            raise ValueError("End date cannot be before start date")
+        
+        # Format dates as ISO strings for the calendar store
+        start_iso = format_iso(start_dt)
+        end_iso = format_iso(end_dt)
+        
+        # Get events from the calendar
+        store = CalendarStore(quiet=True)
+        events = store.get_events(
+            calendar_name=calendar_name,
+            start_date=start_iso,
+            end_date=end_iso
+        )
+        
+        return json.dumps({
+            "success": True,
+            "events": events,
+            "count": len(events),
+            "date_range": {
+                "start_date": start_iso,
+                "end_date": end_iso,
+                "days": (end_dt - start_dt).days
+            }
+        }, ensure_ascii=False)
+    except ValueError as e:
+        return json.dumps({
+            "success": False,
+            "error": f"Date error: {str(e)}"
+        }, ensure_ascii=False)
+    except CalendarStoreError as e:
+        return json.dumps({
+            "success": False,
+            "error": str(e)
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "error": f"Unexpected error: {str(e)}"
+        }, ensure_ascii=False)
 
 
 # JSON API endpoints -------------------------------------------------------

@@ -36,7 +36,7 @@ This automatically:
 | Option | Description |
 |--------|-------------|
 | `--host HOST` | Host to bind server to (default: 127.0.0.1) |
-| `--port PORT` | Port to bind server to (default: 3000) |
+| `--port PORT` | Port to bind server to (default: 27212) |
 | `--logdir DIR` | Directory for log files (default: /tmp) |
 | `--load` | Automatically load the Launch Agent after creation |
 

@@ -89,7 +89,7 @@ def get_agent_name(name: Optional[str] = None) -> str:
 
 def generate_launch_agent_plist(
     agent_name: str,
-    port: int = 3000,
+    port: int = 27212,
     log_dir: str = "/tmp",
     python_exec: Optional[str] = None,
     working_dir: Optional[str] = None
@@ -179,7 +179,7 @@ def create_launch_agent(
         
         # Get parameters or defaults
         name = get_agent_name(agent_name)
-        port_num = port or int(os.environ.get("SERVER_PORT", "3000"))
+        port_num = port or int(os.environ.get("SERVER_PORT", "27212"))
         logs_dir = log_dir or paths["log_dir"]
         
         # Create the LaunchAgents directory if it doesn't exist

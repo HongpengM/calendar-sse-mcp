@@ -26,7 +26,7 @@ from .date_utils import create_date_range, format_iso
 
 
 # Get port from environment or use default
-port = int(os.environ.get("SERVER_PORT", "3000"))
+port = int(os.environ.get("SERVER_PORT", "27212"))
 
 # Create the MCP server with port setting
 mcp = FastMCP("Calendar MCP", port=port)

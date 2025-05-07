@@ -110,16 +110,49 @@ def main():
         
         # Wait for responses
         print("\nWaiting for responses...")
-        time.sleep(5)
+        time.sleep(3) # Reduced wait time as event creation is usually fast
         
-        # Step 6: Test searching for events
+        # Step 6: Test searching for events (default date range - likely won't find the 2023 event)
+        print("\nStep 6: Searching for 'Test event from MCP client' in default date range (likely no results for old event)")
         send_request(session_id, "search_events", {
             "query": "Test event from MCP client",
-            "calendar_name": calendar_name
+            "calendar_name": calendar_name 
+            # No date params: uses default 3-day window around today
+        })
+        time.sleep(3) # Wait for response
+
+        # Step 7: Test searching for the specific event created using start_date and end_date
+        print("\nStep 7: Searching for the specific event created on 2023-05-10")
+        send_request(session_id, "search_events", {
+            "query": "Test event from MCP client",
+            "calendar_name": calendar_name,
+            "start_date": "2023-05-10",
+            "end_date": "2023-05-10"
+        })
+        time.sleep(3) # Wait for response
+
+        # Step 8: Test searching with start_date and duration
+        print("\nStep 8: Searching for events on 2023-05-10 with 1-day duration")
+        send_request(session_id, "search_events", {
+            "query": "Test event", # Broader query to catch the event
+            "calendar_name": calendar_name,
+            "start_date": "2023-05-10",
+            "duration": "1d"
+        })
+        time.sleep(3) # Wait for response
+
+        # Step 9: Test searching with just duration (e.g., events in the next 7 days from today)
+        # This test is more about checking if the call works; finding specific events depends on current calendar content.
+        # For a predictable result, one might create an event for 'today' before this step.
+        print("\nStep 9: Searching for any events in the Home calendar within the next 7 days from today")
+        send_request(session_id, "search_events", {
+            "query": "", # Empty query to get all events in range
+            "calendar_name": calendar_name,
+            "duration": "7d" # Will be today + 7 days
         })
         
         # Wait for final responses
-        print("\nWaiting for final responses...")
+        print("\nWaiting for final responses from new search tests...")
         time.sleep(5)
         
         print("Tests completed! Press Ctrl+C to exit.")

@@ -700,4 +700,97 @@ def install_server_main():
         print(message)
         
         if not success:
-            sys.exit(1) 
+            sys.exit(1)
+
+
+# --- New helper functions for launchctl ---
+def _get_launch_agent_plist_path(agent_name: Optional[str] = None) -> Path:
+    # ... (logic to determine plist path, similar to what's in check_launch_agent)
+    pass
+
+def _is_agent_loaded(agent_name: Optional[str] = None) -> bool:
+    # ... (logic using launchctl list | grep agent_name)
+    pass
+
+def start_server_agent_command(args: argparse.Namespace) -> None:
+    # Uses launchctl load <plist_path>
+    # Calls _get_launch_agent_plist_path
+    pass
+
+def stop_server_agent_command(args: argparse.Namespace) -> None:
+    # Uses launchctl unload <plist_path>
+    # Calls _get_launch_agent_plist_path
+    pass
+
+def restart_server_agent_command(args: argparse.Namespace) -> None:
+    # Calls stop, then start
+    pass
+
+def logs_server_command(args: argparse.Namespace) -> None:
+    # Adapt from check_launch_agent_command
+    # Add args.level (e.g., "error", "info", "all")
+    # Filter log output based on level (e.g. only show stderr for "error")
+    pass
+
+def install_server_sub_command(args: argparse.Namespace) -> None:
+    # Similar to create_launch_agent_command or parts of install_server_main
+    # Ensure it creates and loads the agent.
+    # Reuses create_launch_agent()
+    # Optionally calls start_server_agent_command
+    pass
+
+def uninstall_server_sub_command(args: argparse.Namespace) -> None:
+    # Calls uninstall_launch_agent_command
+    pass
+
+def update_server_sub_command(args: argparse.Namespace) -> None:
+    # Calls uninstall, then install
+    pass
+
+# --- New main entry point for 'server' script ---
+def server_cli_main() -> None:
+    parser = argparse.ArgumentParser(description="Manage the Calendar MCP server.")
+    subparsers = parser.add_subparsers(title="Commands", dest="command", required=True)
+
+    # install
+    install_parser = subparsers.add_parser("install", help="Install and configure the server as a launch agent.")
+    # ... add args like --port, --logdir, --name
+    install_parser.set_defaults(func=install_server_sub_command)
+
+    # uninstall
+    uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall the server launch agent.")
+    # ... add args like --name
+    uninstall_parser.set_defaults(func=uninstall_server_sub_command)
+
+    # update
+    update_parser = subparsers.add_parser("update", help="Update the server (reinstall the launch agent).")
+    # ... add args like --port, --logdir, --name
+    update_parser.set_defaults(func=update_server_sub_command)
+
+    # start
+    start_parser = subparsers.add_parser("start", help="Start the server launch agent.")
+    # ... add args like --name
+    start_parser.set_defaults(func=start_server_agent_command)
+
+    # stop
+    stop_parser = subparsers.add_parser("stop", help="Stop the server launch agent.")
+    # ... add args like --name
+    stop_parser.set_defaults(func=stop_server_agent_command)
+
+    # restart
+    restart_parser = subparsers.add_parser("restart", help="Restart the server launch agent.")
+    # ... add args like --name
+    restart_parser.set_defaults(func=restart_server_agent_command)
+
+    # logs
+    logs_parser = subparsers.add_parser("logs", help="Show server logs.")
+    logs_parser.add_argument("--level", choices=["info", "error", "all"], default="all", help="Log level to display.")
+    logs_parser.add_argument("--name", help="The name of the launch agent (defaults to com.calendar-sse-mcp).")
+    # Potentially add --lines N
+    logs_parser.set_defaults(func=logs_server_command)
+
+    args = parser.parse_args()
+    args.func(args)
+
+# Modify existing install_server_main to be callable or remove if fully superseded
+# Remove or comment out the old install_server_main if its functionality is fully moved. 

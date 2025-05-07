@@ -1,125 +1,103 @@
 # Calendar SSE MCP Command-line Tools
 
-This document describes the command-line interface for directly interacting with calendars and the MCP server using the `calendar-mcp` script. For managing the server as a background Launch Agent (installing, starting, stopping, viewing logs, etc.), please refer to the [Launch Agent Setup Guide](launch_agent_setup.md) which details the `server` command.
+This document describes the comprehensive command-line interface included with the Calendar SSE MCP package.
 
-## Accessing the `calendar-mcp` CLI
+## Usage
 
-Once the package is installed, you can access this CLI through:
+Once installed, you can access the CLI through either:
 
 ```bash
 # Via uvx (recommended for tools from packages)
-uvx --from calendar-sse-mcp calendar-mcp [command] [options]
+uvx --from calendar-sse-mcp calendar-sse [command] [options]
 
-# Or directly if your environment is set up for it
-# python -m calendar_sse_mcp [command] [options]
-# calendar-mcp [command] [options] (if bin scripts are on PATH)
+# Directly (if installed in your environment)
+calendar-sse [command] [options]
+
+# Or through the Python module
+python -m calendar_sse_mcp [command] [options]
 ```
 
-## Available `calendar-mcp` Commands
+## Command Structure
 
-| Command     | Description                                          |
-|-------------|------------------------------------------------------|
-| `server`    | Run the MCP server in the foreground.                  |
-| `install`   | Install the server for use with Claude.              |
-| `calendars` | List all available calendars.                        |
-| `events`    | Get events from a calendar.                          |
-| `create`    | Create a new event.                                  |
-| `update`    | Update an existing event.                            |
-| `delete`    | Delete an event.                                     |
-| `search`    | Search for events.                                   |
-| `--version` | Show version information.                            |
+The `calendar-sse` command provides two main subcommands:
 
-## `calendar-mcp server` Command
+- `cli`: For direct calendar operations (creating events, searching, etc.)
+- `server`: For server management operations (install, start, stop, etc.)
 
-Run the MCP server directly in the foreground. This is useful for testing or if you don't want to use a Launch Agent.
+## CLI Subcommand
+
+The `cli` subcommand provides direct access to Calendar.app functionality:
 
 ```bash
-calendar-mcp server [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp server [options]
+calendar-sse cli [operation] [options]
 ```
 
-**Options:**
-- `--host HOST` - Host to bind server to (default: 127.0.0.1)
-- `--port PORT` - Port to bind server to (default: 27212)
+**Global Options:**
+- `--dev` - Connect to the development server on port 27213 instead of the standard server on port 27212
 
-## `calendar-mcp install` Command
+### Available Calendar Operations
 
-Install the MCP server for use with an AI assistant like Claude. This command typically registers the server with the MCP tooling.
+| Operation    | Description                         |
+|--------------|-------------------------------------|
+| `calendars`  | List all available calendars        |
+| `events`     | Get events from a calendar          |
+| `create`     | Create a new event                  |
+| `update`     | Update an existing event            |
+| `delete`     | Delete an event                     |
+| `search`     | Search for events                   |
 
-```bash
-calendar-mcp install [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp install [options]
-```
-
-**Options:**
-- `--name NAME` - Custom name for the server in the AI assistant.
-- `--env-file FILE, -f FILE` - Environment file to load variables from when the AI assistant calls the server.
-- `--env-vars VAR, -v VAR` - Environment variables in KEY=VALUE format (can be repeated) for the AI assistant.
-
-## `calendar-mcp calendars` Command
+### `cli calendars` - List Calendars
 
 List all available calendars in Calendar.app:
 
 ```bash
-calendar-mcp calendars [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp calendars [options]
+calendar-sse cli calendars [options]
 ```
 
 **Options:**
 - `--json` - Output in JSON format
 
-## `calendar-mcp events` Command
+### `cli events` - Get Events
 
 Get events from a specific calendar:
 
 ```bash
-calendar-mcp events CALENDAR [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp events CALENDAR [options]
+calendar-sse cli events CALENDAR [options]
 ```
 
 **Arguments:**
 - `CALENDAR` - Name of the calendar to get events from
 
 **Options:**
-- `--start-date DATE` - Start date in format YYYY-MM-DD
-- `--end-date DATE` - End date in format YYYY-MM-DD
+- `--start-date DATE` - Start date in flexible format (e.g., 'yesterday', '2023-01-01')
+- `--end-date DATE` - End date in flexible format (e.g., 'tomorrow', '2023-12-31')
 - `--json` - Output in JSON format
 
-## `calendar-mcp create` Command
+### `cli create` - Create Event
 
 Create a new event in a calendar:
 
 ```bash
-calendar-mcp create CALENDAR SUMMARY [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp create CALENDAR SUMMARY [options]
+calendar-sse cli create [options]
 ```
 
-**Arguments:**
-- `CALENDAR` - Name of the calendar to create the event in (can be omitted if `DEFAULT_CALENDAR` is in `.env`).
-- `SUMMARY` - Event title/summary
-
 **Options:**
-- `--date DATE` - Event date in format YYYY-MM-DD (default: today)
-- `--start-time TIME` - Start time in format HH:MM (default: current time)
-- `--end-time TIME` - End time in format HH:MM (calculated from duration if not provided)
-- `--duration MINUTES` - Duration in minutes (default: 60, or from `.env` `EVENT_DURATION_MINUTES`)
+- `--event TEXT`, `--summary TEXT` - Event title/summary (required)
+- `--cal CALENDAR`, `--calendar CALENDAR` - Name of the calendar (default from .env DEFAULT_CALENDAR)
+- `--date DATE` - Event date in flexible format (default: today)
+- `--start TIME`, `--start-time TIME` - Start time in flexible format (default: current time)
+- `--end TIME`, `--end-time TIME` - End time in flexible format
+- `--duration DURATION` - Duration in flexible format (e.g., '60min', '1h', '1.5 hours') (default: 60min if end time not specified)
 - `--location LOCATION` - Event location
 - `--description TEXT` - Event description
 - `--json` - Output in JSON format
 
-## `calendar-mcp update` Command
+### `cli update` - Update Event
 
 Update an existing event:
 
 ```bash
-calendar-mcp update CALENDAR EVENT_ID [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp update CALENDAR EVENT_ID [options]
+calendar-sse cli update CALENDAR EVENT_ID [options]
 ```
 
 **Arguments:**
@@ -128,21 +106,19 @@ uvx --from calendar-sse-mcp calendar-mcp update CALENDAR EVENT_ID [options]
 
 **Options:**
 - `--summary TEXT` - New event title/summary
-- `--date DATE` - New event date in format YYYY-MM-DD
-- `--start-time TIME` - New start time in format HH:MM
-- `--end-time TIME` - New end time in format HH:MM
+- `--date DATE` - New event date in flexible format
+- `--start-time TIME` - New start time in flexible format
+- `--end-time TIME` - New end time in flexible format
 - `--location LOCATION` - New event location
 - `--description TEXT` - New event description
 - `--json` - Output in JSON format
 
-## `calendar-mcp delete` Command
+### `cli delete` - Delete Event
 
 Delete an event:
 
 ```bash
-calendar-mcp delete CALENDAR EVENT_ID [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp delete CALENDAR EVENT_ID [options]
+calendar-sse cli delete CALENDAR EVENT_ID [options]
 ```
 
 **Arguments:**
@@ -152,71 +128,189 @@ uvx --from calendar-sse-mcp calendar-mcp delete CALENDAR EVENT_ID [options]
 **Options:**
 - `--json` - Output in JSON format
 
-## `calendar-mcp search` Command
+### `cli search` - Search Events
 
 Search for events:
 
 ```bash
-calendar-mcp search QUERY [options]
-# or via uvx
-uvx --from calendar-sse-mcp calendar-mcp search QUERY [options]
+calendar-sse cli search QUERY [options]
 ```
 
 **Arguments:**
 - `QUERY` - Search term (case-insensitive)
 
 **Options:**
-- `--calendar CALENDAR` - Specific calendar to search in (optional, searches all if omitted).
-- `--start-date DATE` - Start date in format YYYY-MM-DD
-- `--end-date DATE` - End date in format YYYY-MM-DD
+- `--calendar CALENDAR` - Specific calendar to search in
+- `--start-date DATE` - Start date in flexible format
+- `--end-date DATE` - End date in flexible format
+- `--duration DURATION` - Duration from start date (e.g., '3d', '1 week', '2 months')
 - `--json` - Output in JSON format
 
-## JSON Output
+## Server Subcommand
 
-Most `calendar-mcp` commands support a `--json` flag that outputs the results in JSON format, which is useful for scripting and integration with other tools.
+The `server` subcommand manages the server as a background service:
+
+```bash
+calendar-sse server [operation] [options]
+```
+
+### Available Server Operations
+
+| Operation    | Description                                      |
+|--------------|--------------------------------------------------|
+| `install`    | Install the server as a LaunchAgent              |
+| `uninstall`  | Uninstall the server LaunchAgent                 |
+| `start`      | Start the server                                 |
+| `stop`       | Stop the server                                  |
+| `restart`    | Restart the server                               |
+| `logs`       | Display server logs                              |
+| `run`        | Run the server directly in the foreground        |
+
+### `server install` - Install Server
+
+Install the server as a LaunchAgent:
+
+```bash
+calendar-sse server install [options]
+```
+
+**Options:**
+- `--port PORT` - Server port (default: 27212)
+- `--logdir DIR` - Log directory (default: /tmp)
+- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--no-load` - Don't start the server after installation
+- `--dev` - Install as a development server on port 27213 (overrides --port)
+
+### `server uninstall` - Uninstall Server
+
+Uninstall the server LaunchAgent:
+
+```bash
+calendar-sse server uninstall [options]
+```
+
+**Options:**
+- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+
+### `server start` - Start Server
+
+Start the server:
+
+```bash
+calendar-sse server start [options]
+```
+
+**Options:**
+- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+
+### `server stop` - Stop Server
+
+Stop the server:
+
+```bash
+calendar-sse server stop [options]
+```
+
+**Options:**
+- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+
+### `server restart` - Restart Server
+
+Restart the server:
+
+```bash
+calendar-sse server restart [options]
+```
+
+**Options:**
+- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+
+### `server logs` - View Logs
+
+View server logs:
+
+```bash
+calendar-sse server logs [options]
+```
+
+**Options:**
+- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--level {info,error,all}` - Log level to display (default: all)
+- `--lines N` - Number of log lines to show (default: 10)
+
+### `server run` - Run in Foreground
+
+Run the server directly in the foreground:
+
+```bash
+calendar-sse server run [options]
+```
+
+**Options:**
+- `--host HOST` - Host to bind to (default: 127.0.0.1)
+- `--port PORT` - Port to bind to (default: 27212)
 
 ## Examples
 
-### List all calendars
+### List Available Calendars
 
 ```bash
-uvx --from calendar-sse-mcp calendar-mcp calendars
+calendar-sse cli calendars
 ```
 
-### Create a new event
+### Create a New Event
 
 ```bash
-# Create a meeting at 10:00 AM today for 1 hour in "Work" calendar
-uvx --from calendar-sse-mcp calendar-mcp create "Work" "Team Meeting" --start-time 10:00
+# Create a meeting at 10:00 AM today for 1 hour
+calendar-sse cli create --event "Team Meeting" --cal "Work" --start "10:00" --duration "1h"
 
-# Create a detailed event in "Personal" calendar
-uvx --from calendar-sse-mcp calendar-mcp create "Personal" "Dinner with Friends" \
-  --date 2023-09-15 \
-  --start-time 19:30 \
-  --end-time 22:00 \
-  --location "Joe's Restaurant" \
-  --description "Reservation for 4 people"
+# Create an event on a specific date with human-readable times
+calendar-sse cli create --event "Dinner with Friends" --cal "Personal" \
+  --date "next Friday" --start "7:30 PM" --duration "2 hours" \
+  --location "Joe's Restaurant" --description "Reservation for 4 people"
 ```
 
-### Update an event
+### Update an Event
 
 ```bash
-# Update the event title in "Work" calendar
-uvx --from calendar-sse-mcp calendar-mcp update "Work" "CA0C1456-..." --summary "Team Sync"
+# Update the event title
+calendar-sse cli update "Work" "CA0C1456-F7C8-4FD5-B8C3-8A2F9D3CE7B9" --summary "Team Sync"
 
 # Update multiple fields
-uvx --from calendar-sse-mcp calendar-mcp update "Work" "CA0C1456-..." \
-  --start-time 14:30 \
-  --end-time 15:30 \
+calendar-sse cli update "Work" "CA0C1456-F7C8-4FD5-B8C3-8A2F9D3CE7B9" \
+  --start-time "2:30 PM" --end-time "3:30 PM" \
   --location "Conference Room B"
 ```
 
-### Search for events
+### Search for Events
 
 ```bash
-# Search for events containing "meeting" across all calendars
-uvx --from calendar-sse-mcp calendar-mcp search "meeting"
+# Search for events containing "meeting"
+calendar-sse cli search "meeting"
 
 # Search in a specific calendar and date range
-uvx --from calendar-sse-mcp calendar-mcp search "lunch" --calendar "Personal" --start-date 2023-09-01 --end-date 2023-09-30
-``` 
+calendar-sse cli search "lunch" --calendar "Personal" --start-date "2023-09-01" --end-date "2023-09-30"
+
+# Search for events in the next week
+calendar-sse cli search "appointment" --duration "7d"
+```
+
+### Managing the Server
+
+```bash
+# Install and start the server
+calendar-sse server install --port 5000 --logdir ~/logs
+
+# View server logs
+calendar-sse server logs --level error
+
+# Restart the server
+calendar-sse server restart
+
+# Uninstall the server
+calendar-sse server uninstall
+```
+
+## JSON Output
+
+Most commands support a `--json` flag that outputs the results in JSON format, which is useful for scripting and integration with other tools. 

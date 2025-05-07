@@ -26,17 +26,22 @@ class CalendarStoreError(Exception):
 class CalendarStore:
     """Class to access macOS Calendar.app using EventKit."""
 
-    def __init__(self, quiet: bool = False) -> None:
+    def __init__(self, quiet: bool = False, port: int = 27212) -> None:
         """
         Initialize the calendar store.
         
         Args:
             quiet: If True, suppresses most console output
+            port: Port to use for API requests (default: 27212)
         """
         self.event_store = EKEventStore.alloc().init()
         self.authorized = False
         self.quiet = quiet
+        self.port = port
         self.request_authorization()
+        
+        if not self.quiet:
+            print(f"Using server on port {self.port}", file=sys.stderr)
 
     def request_authorization(self) -> bool:
         """

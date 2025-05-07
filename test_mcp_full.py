@@ -10,16 +10,22 @@ import uuid
 import re
 import threading
 import time
+import argparse
 from pprint import pprint
 
-# Configuration
-BASE_URL = "http://localhost:27212"
+# Configuration - will be overridden by command-line arguments
+DEFAULT_PORT = 27212
+DEV_PORT = 27213
 
-def listen_for_sse_events(listener_session_id):
+def get_base_url(port):
+    """Get the base URL for the server"""
+    return f"http://localhost:{port}"
+
+def listen_for_sse_events(listener_session_id, base_url):
     """Listen for SSE events continuously and print responses"""
     print(f"Starting SSE listener for session {listener_session_id}...")
     
-    sse_url = f"{BASE_URL}/sse"
+    sse_url = f"{base_url}/sse"
     response = requests.get(sse_url, stream=True, headers={
         "Accept": "text/event-stream"
     })
@@ -45,10 +51,19 @@ def listen_for_sse_events(listener_session_id):
             print(f"Event {event.event}: {event.data}")
 
 def main():
-    print("Connecting to Calendar MCP Server...")
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Test the Calendar MCP Server")
+    parser.add_argument("--dev", action="store_true", help="Test against development server on port 27213")
+    args = parser.parse_args()
+    
+    # Set the server port
+    port = DEV_PORT if args.dev else DEFAULT_PORT
+    base_url = get_base_url(port)
+    
+    print(f"Connecting to Calendar MCP Server at {base_url}...")
     
     # Step 1: Connect to the SSE endpoint
-    response = requests.get(f"{BASE_URL}/sse", stream=True, headers={
+    response = requests.get(f"{base_url}/sse", stream=True, headers={
         "Accept": "text/event-stream"
     })
     
@@ -78,7 +93,7 @@ def main():
         return
     
     # Start a background thread to listen for SSE events on a new connection
-    sse_thread = threading.Thread(target=listen_for_sse_events, args=(session_id,))
+    sse_thread = threading.Thread(target=listen_for_sse_events, args=(session_id, base_url))
     sse_thread.daemon = True
     sse_thread.start()
     
@@ -87,11 +102,11 @@ def main():
     
     try:
         # Step 3: Test list_tools
-        send_request(session_id, "list_tools", {})
+        send_request(session_id, "list_tools", {}, base_url)
         time.sleep(1)  # Wait for response
         
         # Step 4: Test list_all_calendars
-        send_request(session_id, "list_all_calendars", {})
+        send_request(session_id, "list_all_calendars", {}, base_url)
         time.sleep(2)  # Wait for response
         
         # Default calendar name
@@ -106,7 +121,7 @@ def main():
             "end_date": "2023-05-10T15:00:00",
             "location": "Test location",
             "description": "This is a test event created through the MCP server"
-        })
+        }, base_url)
         
         # Wait for responses
         print("\nWaiting for responses...")
@@ -118,7 +133,7 @@ def main():
             "query": "Test event from MCP client",
             "calendar_name": calendar_name 
             # No date params: uses default 3-day window around today
-        })
+        }, base_url)
         time.sleep(3) # Wait for response
 
         # Step 7: Test searching for the specific event created using start_date and end_date
@@ -128,7 +143,7 @@ def main():
             "calendar_name": calendar_name,
             "start_date": "2023-05-10",
             "end_date": "2023-05-10"
-        })
+        }, base_url)
         time.sleep(3) # Wait for response
 
         # Step 8: Test searching with start_date and duration
@@ -138,7 +153,7 @@ def main():
             "calendar_name": calendar_name,
             "start_date": "2023-05-10",
             "duration": "1d"
-        })
+        }, base_url)
         time.sleep(3) # Wait for response
 
         # Step 9: Test searching with just duration (e.g., events in the next 7 days from today)
@@ -149,7 +164,7 @@ def main():
             "query": "", # Empty query to get all events in range
             "calendar_name": calendar_name,
             "duration": "7d" # Will be today + 7 days
-        })
+        }, base_url)
         
         # Wait for final responses
         print("\nWaiting for final responses from new search tests...")
@@ -164,10 +179,10 @@ def main():
     except KeyboardInterrupt:
         print("Test interrupted by user")
     
-def send_request(session_id, method, params):
+def send_request(session_id, method, params, base_url):
     """Send a request to the MCP server and print the response"""
     request_id = str(uuid.uuid4())
-    url = f"{BASE_URL}/messages/?session_id={session_id}"
+    url = f"{base_url}/messages/?session_id={session_id}"
     
     payload = {
         "jsonrpc": "2.0",

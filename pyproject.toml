@@ -18,8 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-calendar-mcp = "calendar_sse_mcp.__main__:main"
-server = "calendar_sse_mcp.__main__:server_cli_main"
+calendar-sse = "calendar_sse_mcp.__main__:cli_main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

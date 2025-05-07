@@ -56,16 +56,32 @@ The easiest way to install and run the calendar service is with uvx:
 
 ```bash
 # Install the server as a Launch Agent with default settings (port 27212)
-uvx --from calendar-sse-mcp server install
+uvx --from calendar-sse-mcp calendar-sse server install
 
 # Customize the installation
-uvx --from calendar-sse-mcp server install --port 5000 --logdir ~/logs
+uvx --from calendar-sse-mcp calendar-sse server install --port 5000 --logdir ~/logs
 
-# Update the package and reinstall the launch agent
-uvx --refresh --from calendar-sse-mcp server update
+# Install a development server on port 27213
+uvx --from calendar-sse-mcp calendar-sse server install --dev
 
-# Uninstall the server launch agent
-uvx --from calendar-sse-mcp server uninstall
+# Start the server (if not already running)
+uvx --from calendar-sse-mcp calendar-sse server start
+
+# Stop the server
+uvx --from calendar-sse-mcp calendar-sse server stop
+
+# Restart the server
+uvx --from calendar-sse-mcp calendar-sse server restart
+
+# Check server logs
+uvx --from calendar-sse-mcp calendar-sse server logs
+uvx --from calendar-sse-mcp calendar-sse server logs --level error  # Show only error logs
+
+# Uninstall the server
+uvx --from calendar-sse-mcp calendar-sse server uninstall
+
+# Run the server directly in the foreground (for testing)
+uvx --from calendar-sse-mcp calendar-sse server run
 ```
 
 The installation process:
@@ -117,95 +133,78 @@ The package provides a comprehensive command-line interface:
 
 ```bash
 # Using uvx (recommended)
-uvx --from calendar-sse-mcp calendar-mcp [command] [options]
-uvx --from calendar-sse-mcp server [subcommand] [options]
+uvx --from calendar-sse-mcp calendar-sse [command] [options]
 
 # Or directly with the module
 python -m calendar_sse_mcp [command] [options]
-python -m calendar_sse_mcp.server [subcommand] [options] # Assuming server_cli_main is in server.py or a new file
 ```
 
-### Reinstalling the package
-This is now handled by the `update` subcommand of the `server` script.
-```bash
-# Update to the latest version (refresh the uvx cache and reinstall launch agent)
-uvx --refresh --from calendar-sse-mcp server update
+The tool provides two main subcommands:
+- `cli`: For direct calendar operations (creating/updating events, searching, etc.)
+- `server`: For managing the server (install, start, stop, view logs, etc.)
 
-# Update with custom port
-uvx --refresh --from calendar-sse-mcp server update --port 5000 --logdir ~/logs
-```
-
-### Running the server
-To run the server in the foreground (e.g., for debugging):
-```bash
-# Start the MCP server in the foreground
-uvx --from calendar-sse-mcp calendar-mcp server
-
-# Specify host and port
-uvx --from calendar-sse-mcp calendar-mcp server --host 0.0.0.0 --port 5000
-```
-For background service management, see "Managing the Server as a Launch Agent" below.
-
-### Installing as a Claude MCP server
-```bash
-# Install as a Claude MCP server
-uvx --from calendar-sse-mcp calendar-mcp install
-
-# With a custom name
-uvx --from calendar-sse-mcp calendar-mcp install --name "My Calendar"
-```
-
-### Setting up as a Launch Agent (background service)
-
-The package includes a built-in command to create and install a Launch Agent:
+### Managing the Server
 
 ```bash
-# Install and start the Launch Agent (default settings)
-uvx --from calendar-sse-mcp server install
+# Install and start the Launch Agent
+uvx --from calendar-sse-mcp calendar-sse server install
 
 # Customize port and log directory during installation
-uvx --from calendar-sse-mcp server install --port 5000 --logdir ~/logs
+uvx --from calendar-sse-mcp calendar-sse server install --port 5000 --logdir ~/logs
 
-# Start the Launch Agent (if not already running)
-uvx --from calendar-sse-mcp server start
+# Install a development server on port 27213
+uvx --from calendar-sse-mcp calendar-sse server install --dev
 
-# Stop the Launch Agent
-uvx --from calendar-sse-mcp server stop
+# Start the server (if not already running)
+uvx --from calendar-sse-mcp calendar-sse server start
 
-# Restart the Launch Agent
-uvx --from calendar-sse-mcp server restart
+# Stop the server
+uvx --from calendar-sse-mcp calendar-sse server stop
 
-# Check the status and view logs for the Launch Agent
-uvx --from calendar-sse-mcp server logs
-uvx --from calendar-sse-mcp server logs --level error # Show only error logs
+# Restart the server
+uvx --from calendar-sse-mcp calendar-sse server restart
 
-# Uninstall the Launch Agent
-uvx --from calendar-sse-mcp server uninstall
+# Check server logs
+uvx --from calendar-sse-mcp calendar-sse server logs
+uvx --from calendar-sse-mcp calendar-sse server logs --level error  # Show only error logs
 
-# Update the server (reinstalls package and Launch Agent)
-uvx --refresh --from calendar-sse-mcp server update
+# Uninstall the server
+uvx --from calendar-sse-mcp calendar-sse server uninstall
+
+# Run the server directly in the foreground (for testing)
+uvx --from calendar-sse-mcp calendar-sse server run
 ```
 
 ### Managing Calendar Events
 
+Use the `cli` subcommand for direct calendar operations:
+
 ```bash
 # List all calendars
-uvx --from calendar-sse-mcp calendar-mcp calendars
+uvx --from calendar-sse-mcp calendar-sse cli calendars
+
+# Connect to a development server on port 27213
+uvx --from calendar-sse-mcp calendar-sse cli --dev calendars
 
 # Get events from a calendar
-uvx --from calendar-sse-mcp calendar-mcp events "Work"
+uvx --from calendar-sse-mcp calendar-sse cli events "Work"
 
 # Create a new event
-uvx --from calendar-sse-mcp calendar-mcp create "Work" "Team Meeting" --start-time 10:00
+uvx --from calendar-sse-mcp calendar-sse cli create --event "Team Meeting" --cal "Work" --start "10:00" --duration "1h"
+
+# Create an event with flexible date/time formats
+uvx --from calendar-sse-mcp calendar-sse cli create --event "Lunch with John" --cal "Personal" \
+  --date "next Monday" --start "12pm" --duration "1.5 hours" \
+  --location "Joe's Restaurant" --description "Discuss project"
 
 # Update an event
-uvx --from calendar-sse-mcp calendar-mcp update "Work" "EVENT_ID" --summary "Updated Meeting"
+uvx --from calendar-sse-mcp calendar-sse cli update "Work" "EVENT_ID" --summary "Updated Meeting"
 
 # Delete an event
-uvx --from calendar-sse-mcp calendar-mcp delete "Work" "EVENT_ID"
+uvx --from calendar-sse-mcp calendar-sse cli delete "Work" "EVENT_ID"
 
 # Search for events
-uvx --from calendar-sse-mcp calendar-mcp search "meeting" --calendar "Work"
+uvx --from calendar-sse-mcp calendar-sse cli search "meeting" --calendar "Work" --start-date "next Monday" --duration "7d"
 ```
 
 For more details, see the [CLI Tools Documentation](docs/cli_tools.md).

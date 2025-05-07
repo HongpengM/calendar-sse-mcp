@@ -25,11 +25,24 @@ from .models import ApiResponse, CalendarEvent, EventCreate, EventUpdate, EventL
 from .date_utils import create_date_range, format_iso
 
 
-# Get port from environment or use default
-port = int(os.environ.get("SERVER_PORT", "27212"))
+# Create the MCP server - settings can be passed to the constructor
+mcp = FastMCP(
+    "Calendar MCP",
+    port=int(os.environ.get("SERVER_PORT", "27212")),
+    host=os.environ.get("SERVER_HOST", "127.0.0.1")
+)
 
-# Create the MCP server with port setting
-mcp = FastMCP("Calendar MCP", port=port)
+# Main entry point ---------------------------------------------------------
+
+if __name__ == "__main__":
+    # Get the port from environment variables
+    port = int(os.environ.get("SERVER_PORT", "27212"))
+    transport = os.environ.get("SERVER_TRANSPORT", "sse")
+    
+    print(f"Server configured with port={port}, transport={transport}")
+    
+    # Run the server with the specified transport
+    mcp.run(transport=transport)
 
 
 # Resources -----------------------------------------------------------------
@@ -824,10 +837,4 @@ def api_delete_event_path(event_id: str, calendar_name: str) -> str:
         return json.dumps(response.model_dump(), ensure_ascii=False)
     except Exception as e:
         response = ApiResponse.error(message=f"Unexpected error: {str(e)}")
-        return json.dumps(response.model_dump(), ensure_ascii=False)
-
-
-# Main entry point ---------------------------------------------------------
-
-if __name__ == "__main__":
-    mcp.run() 
+        return json.dumps(response.model_dump(), ensure_ascii=False) 

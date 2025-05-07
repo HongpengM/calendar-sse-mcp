@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, NoReturn, Callable, Union
 
 import dotenv
+import dateparser
+import re
 
 from . import calendar_store, __version__
 from .calendar_store import CalendarStoreError
@@ -25,119 +27,230 @@ from .date_utils import create_date_range, format_iso
 dotenv.load_dotenv()
 
 
+# ----- Utility functions -----
+
 def get_env(key: str, default: Optional[str] = None) -> Optional[str]:
     """Get environment variable with fallback to default."""
     return os.environ.get(key, default)
 
 
-def run_server_command(args: argparse.Namespace) -> None:
-    """Run the MCP server"""
-    host = args.host or get_env("SERVER_HOST", "127.0.0.1")
-    port = args.port or get_env("SERVER_PORT", "27212")
-    
-    # FastMCP doesn't accept host or port as parameters directly
-    # Set them through environment variables
-    os.environ["SERVER_PORT"] = str(port)
-    
-    # Run the server with SSE transport
-    mcp.run(transport="sse")
+def show_version():
+    """Display the package version and exit"""
+    print(f"calendar-sse-mcp version {__version__}")
+    sys.exit(0)
 
 
-def install_server_command(args: argparse.Namespace) -> None:
-    """Install the MCP server in Claude"""
-    script_path = Path(__file__).parent / "server.py"
-    cmd = ["mcp", "install", str(script_path)]
-    
-    if args.name:
-        cmd.extend(["--name", args.name])
-    
-    if args.env_file:
-        cmd.extend(["-f", args.env_file])
-    
-    if args.env_vars:
-        for var in args.env_vars:
-            cmd.extend(["-v", var])
-    
-    subprocess.run(cmd, check=True)
+def _get_launch_agent_plist_path(agent_name: str) -> Path:
+    """Get the path to the launch agent plist file"""
+    home_dir = Path.home()
+    return home_dir / "Library" / "LaunchAgents" / f"{agent_name}.plist"
 
 
-def create_launch_agent_command(args: argparse.Namespace) -> None:
-    """Create and install a Launch Agent plist"""
-    # Get arguments or defaults
-    port = args.port or int(os.environ.get("SERVER_PORT", "27212"))
-    logdir = args.logdir or os.environ.get("LOG_DIR", "/tmp")
-    agent_name = args.name or os.environ.get("LAUNCH_AGENT_NAME", "com.calendar-sse-mcp")
-    auto_load = args.load or os.environ.get("AUTO_LOAD_AGENT", "").lower() == "true"
-    
-    # Use the dynamic launch agent creation function
-    success, message, plist_path = create_launch_agent(
-        agent_name=agent_name,
-        port=port,
-        log_dir=logdir,
-        auto_load=auto_load
-    )
-    
-    print(message)
-    
-    if not success:
-        sys.exit(1)
+def _run_launchctl_command(operation: str, plist_path: Path) -> bool:
+    """Run a launchctl command (load/unload) on a plist file"""
+    try:
+        result = subprocess.run(
+            ["launchctl", operation, str(plist_path)],
+            check=False,
+            capture_output=True,
+            text=True
+        )
+        return result.returncode == 0
+    except Exception as e:
+        print(f"Error running launchctl {operation}: {e}", file=sys.stderr)
+        return False
 
 
-def check_launch_agent_command(args: argparse.Namespace) -> None:
-    """Check the status of installed launch agents"""
-    agent_name = args.name or os.environ.get("LAUNCH_AGENT_NAME", "com.calendar-sse-mcp")
-    show_logs = args.show_logs
-    
-    is_loaded, status = check_launch_agent(agent_name=agent_name, show_logs=show_logs)
-    
-    if not status["installed"]:
-        print(f"Launch Agent not installed at: {status['plist_path']}")
-        sys.exit(1)
-    
-    print(f"Launch Agent installed at: {status['plist_path']}")
-    
-    if status["loaded"]:
-        print("Launch Agent is loaded and running")
-        if status["process_info"]:
-            print(f"Status details:\n{status['process_info']}")
-    else:
-        print("Launch Agent is installed but not currently loaded")
-    
-    if status["stdout_log"]:
-        print(f"\nStdout log exists at: {status['stdout_log']}")
-        if show_logs and status["stdout_content"]:
-            print("\nLast 10 lines of stdout log:")
-            for line in status["stdout_content"]:
-                print(line.rstrip())
-    else:
-        print("\nStdout log does not exist")
-    
-    if status["stderr_log"]:
-        print(f"Stderr log exists at: {status['stderr_log']}")
-        if show_logs and status["stderr_content"]:
-            print("\nLast 10 lines of stderr log:")
-            for line in status["stderr_content"]:
-                print(line.rstrip())
-    else:
-        print("Stderr log does not exist")
+# ----- CLI Command Parsers -----
+
+def add_calendars_parser(subparsers):
+    """Add the calendars command parser"""
+    parser = subparsers.add_parser("calendars", help="List all available calendars")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=list_calendars_command)
+    return parser
 
 
-def uninstall_launch_agent_command(args: argparse.Namespace) -> None:
-    """Uninstall a Launch Agent"""
-    agent_name = args.name or os.environ.get("LAUNCH_AGENT_NAME", "com.calendar-sse-mcp")
-    
-    success, message = uninstall_launch_agent(agent_name=agent_name)
-    print(message)
-    
-    if not success:
-        sys.exit(1)
+def add_events_parser(subparsers):
+    """Add the events command parser"""
+    parser = subparsers.add_parser("events", help="Get events from a calendar")
+    parser.add_argument("calendar", help="Name of the calendar")
+    parser.add_argument("--start-date", help="Start date in flexible format (e.g. 'yesterday', '2023-01-01')")
+    parser.add_argument("--end-date", help="End date in flexible format (e.g. 'tomorrow', '2023-12-31')")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=get_events_command)
+    return parser
 
+
+def add_create_parser(subparsers):
+    """Add the create command parser"""
+    parser = subparsers.add_parser("create", help="Create a new event")
+    parser.add_argument("--cal", "--calendar", dest="calendar", help="Name of the calendar (default from .env DEFAULT_CALENDAR)")
+    parser.add_argument("--event", "--summary", dest="summary", required=True, help="Event title/summary")
+    parser.add_argument("--date", default=datetime.datetime.now().strftime("%Y-%m-%d"), 
+                        help="Event date in flexible format (default: today)")
+    parser.add_argument("--start", "--start-time", dest="start_time", 
+                        default=datetime.datetime.now().strftime("%H:%M"),
+                        help="Start time in flexible format (default: current time)")
+    parser.add_argument("--end", "--end-time", dest="end_time", 
+                        help="End time in flexible format (calculated from duration if not provided)")
+    parser.add_argument("--duration", type=str, help="Duration (e.g. '60min', '1h', '1.5 hours', default: 60min)")
+    parser.add_argument("--location", help="Event location")
+    parser.add_argument("--description", help="Event description")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=create_event_command_v2)
+    return parser
+
+
+def add_update_parser(subparsers):
+    """Add the update command parser"""
+    parser = subparsers.add_parser("update", help="Update an existing event")
+    parser.add_argument("calendar", help="Name of the calendar")
+    parser.add_argument("event_id", help="ID of the event to update")
+    parser.add_argument("--summary", help="New event title/summary")
+    parser.add_argument("--date", help="New event date in flexible format")
+    parser.add_argument("--start-time", help="New start time in flexible format")
+    parser.add_argument("--end-time", help="New end time in flexible format")
+    parser.add_argument("--location", help="New event location")
+    parser.add_argument("--description", help="New event description")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=update_event_command)
+    return parser
+
+
+def add_delete_parser(subparsers):
+    """Add the delete command parser"""
+    parser = subparsers.add_parser("delete", help="Delete an event")
+    parser.add_argument("calendar", help="Name of the calendar")
+    parser.add_argument("event_id", help="ID of the event to delete")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=delete_event_command)
+    return parser
+
+
+def add_search_parser(subparsers):
+    """Add the search command parser"""
+    parser = subparsers.add_parser("search", help="Search for events")
+    parser.add_argument("query", help="Search term (case-insensitive)")
+    parser.add_argument("--calendar", help="Specific calendar to search in")
+    parser.add_argument("--start-date", help="Start date in flexible format")
+    parser.add_argument("--end-date", help="End date in flexible format")
+    parser.add_argument("--duration", help="Duration from start date (e.g., '3d', '1 week')")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=search_events_command)
+    return parser
+
+
+def create_cli_parser(subparsers):
+    """Create the CLI command parser"""
+    cli_parser = subparsers.add_parser("cli", help="Direct calendar operations")
+    cli_parser.add_argument("--dev", action="store_true", help="Connect to development server (port 27213)")
+    cli_subparsers = cli_parser.add_subparsers(dest="cli_command", help="Calendar operation", required=True)
+    
+    # Add calendar operations to cli_subparsers
+    add_calendars_parser(cli_subparsers)
+    add_events_parser(cli_subparsers)
+    add_create_parser(cli_subparsers)
+    add_update_parser(cli_subparsers)
+    add_delete_parser(cli_subparsers)
+    add_search_parser(cli_subparsers)
+    
+    return cli_parser
+
+
+# ----- Server Command Parsers -----
+
+def add_start_parser(subparsers):
+    """Add the start command parser"""
+    parser = subparsers.add_parser("start", help="Start the server")
+    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.set_defaults(func=server_start_command)
+    return parser
+
+
+def add_stop_parser(subparsers):
+    """Add the stop command parser"""
+    parser = subparsers.add_parser("stop", help="Stop the server")
+    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.set_defaults(func=server_stop_command)
+    return parser
+
+
+def add_restart_parser(subparsers):
+    """Add the restart command parser"""
+    parser = subparsers.add_parser("restart", help="Restart the server")
+    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.set_defaults(func=server_restart_command)
+    return parser
+
+
+def add_install_parser(subparsers):
+    """Add the install command parser"""
+    parser = subparsers.add_parser("install", help="Install the server as a LaunchAgent")
+    parser.add_argument("--port", type=int, default=27212, help="Server port (default: 27212)")
+    parser.add_argument("--logdir", default="/tmp", help="Log directory (default: /tmp)")
+    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--no-load", action="store_true", help="Don't load the agent after creation")
+    parser.add_argument("--dev", action="store_true", help="Install as development server on port 27213")
+    parser.set_defaults(func=server_install_command)
+    return parser
+
+
+def add_uninstall_parser(subparsers):
+    """Add the uninstall command parser"""
+    parser = subparsers.add_parser("uninstall", help="Uninstall the server LaunchAgent")
+    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.set_defaults(func=server_uninstall_command)
+    return parser
+
+
+def add_logs_parser(subparsers):
+    """Add the logs command parser"""
+    parser = subparsers.add_parser("logs", help="Display server logs")
+    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--level", choices=["info", "error", "all"], default="all", 
+                       help="Log level to display (info=stdout, error=stderr, all=both)")
+    parser.add_argument("--lines", type=int, default=10, help="Number of log lines to show")
+    parser.set_defaults(func=server_logs_command)
+    return parser
+
+
+def add_run_parser(subparsers):
+    """Add the run command parser"""
+    parser = subparsers.add_parser("run", help="Run the server directly in the foreground")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=27212, help="Port to bind to")
+    parser.add_argument("--dev", action="store_true", help="Run on development port (27213)")
+    parser.set_defaults(func=run_server_command)
+    return parser
+
+
+def create_server_parser(subparsers):
+    """Create the server command parser"""
+    server_parser = subparsers.add_parser("server", help="Server management operations")
+    server_subparsers = server_parser.add_subparsers(dest="server_command", help="Server operation", required=True)
+    
+    add_start_parser(server_subparsers)
+    add_stop_parser(server_subparsers)
+    add_restart_parser(server_subparsers)
+    add_install_parser(server_subparsers)
+    add_uninstall_parser(server_subparsers)
+    add_logs_parser(server_subparsers)
+    add_run_parser(server_subparsers)
+    
+    return server_parser
+
+
+# ----- CLI Command Handlers -----
 
 def list_calendars_command(args: argparse.Namespace) -> None:
     """List all available calendars"""
     try:
+        # Get server port - use dev port if specified
+        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
+        
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json)
+        store = calendar_store.CalendarStore(quiet=args.json, port=port)
         calendars = store.get_all_calendars()
         
         if args.json:
@@ -157,6 +270,9 @@ def list_calendars_command(args: argparse.Namespace) -> None:
 def get_events_command(args: argparse.Namespace) -> None:
     """Get events from a calendar"""
     try:
+        # Get server port - use dev port if specified
+        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
+        
         # Handle date ranges by adjusting time components
         start_date = args.start_date
         end_date = args.end_date
@@ -170,7 +286,7 @@ def get_events_command(args: argparse.Namespace) -> None:
             end_date = f"{end_date}T23:59:59"
             
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json)
+        store = calendar_store.CalendarStore(quiet=args.json, port=port)
         events = store.get_events(
             calendar_name=args.calendar,
             start_date=start_date,
@@ -192,32 +308,82 @@ def get_events_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def create_event_command(args: argparse.Namespace) -> None:
-    """Create a new event"""
+def create_event_command_v2(args: argparse.Namespace) -> None:
+    """Create a new event with flexible time parsing"""
     try:
+        # Get server port - use dev port if specified
+        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
+        
         # Get calendar from args or env
         calendar = args.calendar or get_env("DEFAULT_CALENDAR")
         if not calendar:
-            print("Error: No calendar specified. Please provide a calendar name or set DEFAULT_CALENDAR in .env", file=sys.stderr)
+            print("Error: No calendar specified. Please provide a calendar name with --cal or set DEFAULT_CALENDAR in .env", 
+                  file=sys.stderr)
             sys.exit(1)
             
-        # Parse start and end times
-        duration = args.duration or int(get_env("EVENT_DURATION_MINUTES", "60"))
+        # Parse date
+        date_str = args.date
+        parsed_date = dateparser.parse(date_str)
+        if not parsed_date:
+            print(f"Error: Could not parse date '{date_str}'", file=sys.stderr)
+            sys.exit(1)
+        date_only = parsed_date.strftime("%Y-%m-%d")
         
-        if args.duration and not args.end_time:
-            # Calculate end time based on duration
-            start = datetime.datetime.strptime(f"{args.date}T{args.start_time}", "%Y-%m-%dT%H:%M")
-            end = start + datetime.timedelta(minutes=duration)
-            end_time = end.strftime("%H:%M")
+        # Parse start time
+        start_time_str = args.start_time
+        parsed_start = dateparser.parse(f"{date_only} {start_time_str}")
+        if not parsed_start:
+            print(f"Error: Could not parse start time '{start_time_str}'", file=sys.stderr)
+            sys.exit(1)
+        start_time = parsed_start.strftime("%H:%M")
+        
+        # Parse end time or duration
+        if args.end_time:
+            # End time is provided directly
+            parsed_end = dateparser.parse(f"{date_only} {args.end_time}")
+            if not parsed_end:
+                print(f"Error: Could not parse end time '{args.end_time}'", file=sys.stderr)
+                sys.exit(1)
+            end_time = parsed_end.strftime("%H:%M")
         else:
-            end_time = args.end_time
+            # Calculate end time from duration
+            duration_minutes = 60  # Default duration
+            
+            if args.duration:
+                # Try to parse the duration string
+                duration_str = args.duration.lower()
+                
+                # First try to extract numeric part and unit
+                match = re.search(r'(\d+\.?\d*)\s*([a-zA-Z]+)', duration_str)
+                if match:
+                    value = float(match.group(1))
+                    unit = match.group(2)
+                    
+                    if 'hour' in unit or unit.startswith('h'):
+                        duration_minutes = int(value * 60)
+                    elif 'min' in unit or unit.startswith('m'):
+                        duration_minutes = int(value)
+                    else:
+                        print(f"Warning: Unrecognized duration unit '{unit}', using default 60 minutes", file=sys.stderr)
+                else:
+                    # Try to interpret as a pure number (minutes)
+                    try:
+                        duration_minutes = int(float(duration_str))
+                    except ValueError:
+                        print(f"Warning: Could not parse duration '{duration_str}', using default 60 minutes", 
+                              file=sys.stderr)
+            
+            # Calculate end time
+            start_dt = datetime.datetime.strptime(f"{date_only}T{start_time}", "%Y-%m-%dT%H:%M")
+            end_dt = start_dt + datetime.timedelta(minutes=duration_minutes)
+            end_time = end_dt.strftime("%H:%M")
         
         # Format ISO8601 dates
-        start_date = f"{args.date}T{args.start_time}:00"
-        end_date = f"{args.date}T{end_time}:00"
+        start_date = f"{date_only}T{start_time}:00"
+        end_date = f"{date_only}T{end_time}:00"
         
-        # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json)
+        # Create the event
+        store = calendar_store.CalendarStore(quiet=args.json, port=port)
         event_id = store.create_event(
             calendar_name=calendar,
             summary=args.summary,
@@ -230,18 +396,30 @@ def create_event_command(args: argparse.Namespace) -> None:
         if args.json:
             print(json.dumps({"success": True, "event_id": event_id}, ensure_ascii=False))
         else:
-            print(f"Event created successfully! Event ID: {event_id}")
+            print(f"Event '{args.summary}' created successfully in calendar '{calendar}'")
+            print(f"  Date: {date_only}")
+            print(f"  Time: {start_time} - {end_time}")
+            print(f"  Event ID: {event_id}")
     except CalendarStoreError as e:
-        print(f"Error: {e}", file=sys.stderr)
+        if args.json:
+            print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        if args.json:
+            print(json.dumps({"success": False, "error": f"Unexpected error: {e}"}, ensure_ascii=False))
+        else:
+            print(f"Unexpected error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def update_event_command(args: argparse.Namespace) -> None:
     """Update an existing event"""
     try:
+        # Get server port - use dev port if specified
+        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
+        
         # Format ISO8601 dates if provided
         start_date = None
         if args.date and args.start_time:
@@ -252,7 +430,7 @@ def update_event_command(args: argparse.Namespace) -> None:
             end_date = f"{args.date}T{args.end_time}:00"
         
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json)
+        store = calendar_store.CalendarStore(quiet=args.json, port=port)
         success = store.update_event(
             event_id=args.event_id,
             calendar_name=args.calendar,
@@ -284,8 +462,11 @@ def update_event_command(args: argparse.Namespace) -> None:
 def delete_event_command(args: argparse.Namespace) -> None:
     """Delete an event"""
     try:
+        # Get server port - use dev port if specified
+        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
+        
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json)
+        store = calendar_store.CalendarStore(quiet=args.json, port=port)
         success = store.delete_event(
             event_id=args.event_id,
             calendar_name=args.calendar
@@ -312,6 +493,9 @@ def delete_event_command(args: argparse.Namespace) -> None:
 def search_events_command(args: argparse.Namespace) -> None:
     """Search for events"""
     try:
+        # Get server port - use dev port if specified
+        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
+        
         # Get calendar from args, but don't default to DEFAULT_CALENDAR
         # This allows searching across all calendars when not specified
         calendar_name = args.calendar
@@ -329,7 +513,7 @@ def search_events_command(args: argparse.Namespace) -> None:
             end_date = f"{end_date}T23:59:59"
         
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json)
+        store = calendar_store.CalendarStore(quiet=args.json, port=port)
         events = store.get_events(
             calendar_name=calendar_name,
             start_date=start_date,
@@ -363,211 +547,186 @@ def search_events_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def show_version():
-    """Display the package version and exit"""
-    print(f"calendar-sse-mcp version {__version__}")
-    sys.exit(0)
+# ----- Server Command Handlers -----
 
+def run_server_command(args: argparse.Namespace) -> None:
+    """Run the MCP server"""
+    # Get server port - use dev port if specified
+    port = 27213 if hasattr(args, 'dev') and args.dev else args.port or get_env("SERVER_PORT", "27212")
+    host = args.host or get_env("SERVER_HOST", "127.0.0.1")
+    
+    # Set environment variables for the server
+    os.environ["SERVER_HOST"] = str(host)
+    os.environ["SERVER_PORT"] = str(port)
+    
+    print(f"Starting server on {host}:{port}...")
+    
+    # Set the settings directly on the mcp object
+    mcp.settings.port = port
+    mcp.settings.host = host
+    
+    # Run the server with SSE transport
+    mcp.run(transport="sse")
+
+
+def server_install_command(args: argparse.Namespace) -> None:
+    """Install the server as a Launch Agent"""
+    agent_name = args.name
+    plist_path = _get_launch_agent_plist_path(agent_name)
+    
+    # If --dev is specified, override the port to 27213
+    if args.dev:
+        port = 27213
+        print(f"Installing in DEVELOPMENT mode on port {port}")
+    else:
+        port = args.port
+    
+    # Check if the agent is already installed
+    if plist_path.exists():
+        print(f"Launch Agent '{agent_name}' is already installed. Removing first...")
+        _run_launchctl_command("unload", plist_path)
+        try:
+            plist_path.unlink()
+            print(f"Existing Launch Agent plist removed: {plist_path}")
+        except Exception as e:
+            print(f"Error removing existing plist: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Create and install the Launch Agent
+    print(f"Installing Launch Agent '{agent_name}' with port {port}...")
+    success, message, new_plist_path = create_launch_agent(
+        agent_name=agent_name,
+        port=port,
+        log_dir=args.logdir,
+        auto_load=not args.no_load
+    )
+    
+    print(message)
+    
+    if not success:
+        sys.exit(1)
+    
+    if not args.no_load:
+        print(f"Launch Agent started. Server is running at http://localhost:{port}")
+        print(f"Log files: {args.logdir}/{agent_name}-stdout.log and {args.logdir}/{agent_name}-stderr.log")
+
+
+def server_uninstall_command(args: argparse.Namespace) -> None:
+    """Uninstall the server Launch Agent"""
+    agent_name = args.name
+    success, message = uninstall_launch_agent(agent_name=agent_name)
+    print(message)
+    
+    if not success:
+        sys.exit(1)
+
+
+def server_start_command(args: argparse.Namespace) -> None:
+    """Start the server Launch Agent"""
+    agent_name = args.name
+    plist_path = _get_launch_agent_plist_path(agent_name)
+    
+    if not plist_path.exists():
+        print(f"Error: Launch Agent '{agent_name}' is not installed. Install it first with 'calendar-sse server install'", 
+              file=sys.stderr)
+        sys.exit(1)
+    
+    # Check if already loaded
+    loaded = False
+    try:
+        result = subprocess.run(
+            ["launchctl", "list"],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        loaded = agent_name in result.stdout
+    except Exception:
+        # Can't determine if it's loaded, so we'll try to load it anyway
+        pass
+    
+    if loaded:
+        print(f"Launch Agent '{agent_name}' is already running.")
+        return
+    
+    print(f"Starting Launch Agent '{agent_name}'...")
+    if _run_launchctl_command("load", plist_path):
+        print(f"Launch Agent '{agent_name}' started successfully.")
+    else:
+        print(f"Failed to start Launch Agent '{agent_name}'", file=sys.stderr)
+        sys.exit(1)
+
+
+def server_stop_command(args: argparse.Namespace) -> None:
+    """Stop the server Launch Agent"""
+    agent_name = args.name
+    plist_path = _get_launch_agent_plist_path(agent_name)
+    
+    if not plist_path.exists():
+        print(f"Error: Launch Agent '{agent_name}' is not installed.", file=sys.stderr)
+        sys.exit(1)
+    
+    print(f"Stopping Launch Agent '{agent_name}'...")
+    if _run_launchctl_command("unload", plist_path):
+        print(f"Launch Agent '{agent_name}' stopped successfully.")
+    else:
+        print(f"Failed to stop Launch Agent '{agent_name}'", file=sys.stderr)
+        sys.exit(1)
+
+
+def server_restart_command(args: argparse.Namespace) -> None:
+    """Restart the server Launch Agent"""
+    agent_name = args.name
+    server_stop_command(args)
+    server_start_command(args)
+
+
+def server_logs_command(args: argparse.Namespace) -> None:
+    """Display server logs"""
+    agent_name = args.name
+    is_loaded, status = check_launch_agent(agent_name=agent_name, show_logs=True)
+    
+    if not status["installed"]:
+        print(f"Launch Agent '{agent_name}' is not installed.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Display status information
+    print(f"Launch Agent '{agent_name}' status: {'running' if status['loaded'] else 'stopped'}")
+    
+    # Display logs based on level
+    if args.level in ["all", "info"] and status["stdout_log"]:
+        print(f"\n--- Last {args.lines} lines of stdout log ({status['stdout_log']}) ---")
+        if status["stdout_content"]:
+            for line in status["stdout_content"][-args.lines:]:
+                print(line.rstrip())
+        else:
+            print("(No stdout content)")
+    
+    if args.level in ["all", "error"] and status["stderr_log"]:
+        print(f"\n--- Last {args.lines} lines of stderr log ({status['stderr_log']}) ---")
+        if status["stderr_content"]:
+            for line in status["stderr_content"][-args.lines:]:
+                print(line.rstrip())
+        else:
+            print("(No stderr content)")
+    
+    if not status["stdout_log"] and not status["stderr_log"]:
+        print("No log files found.")
+
+
+# ----- Main Entry Point -----
 
 def main():
-    """Main entry point for the CLI"""
-    parser = argparse.ArgumentParser(description="Calendar MCP Server CLI")
+    """Main entry point for the calendar-sse CLI"""
+    parser = argparse.ArgumentParser(description="Calendar SSE MCP Tool")
     parser.add_argument("--version", action="store_true", help="Show version information and exit")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run", required=False)
     
-    # Server command
-    server_parser = subparsers.add_parser("server", help="Run the MCP server")
-    server_parser.add_argument("--host", help="Server host")
-    server_parser.add_argument("--port", type=int, help="Server port")
-    server_parser.set_defaults(func=run_server_command)
+    # Add subparsers for "cli" and "server" commands
+    subparsers = parser.add_subparsers(dest="command", help="Command category", required=False)
     
-    # Install server command
-    install_parser = subparsers.add_parser("install", help="Install the server in Claude")
-    install_parser.add_argument("--name", help="Custom name for the server")
-    install_parser.add_argument("--env-file", help="Environment file to use")
-    install_parser.add_argument("--env-vars", nargs="+", help="Environment variables to set")
-    install_parser.set_defaults(func=install_server_command)
-    
-    # Launch agent commands
-    agent_parser = subparsers.add_parser("agent", help="Manage Launch Agent")
-    agent_subparsers = agent_parser.add_subparsers(dest="agent_command", help="Agent command to run", required=True)
-    
-    # Create launch agent command
-    create_agent_parser = agent_subparsers.add_parser("create", help="Create a Launch Agent")
-    create_agent_parser.add_argument("--name", help="Launch Agent name")
-    create_agent_parser.add_argument("--port", type=int, help="Server port")
-    create_agent_parser.add_argument("--logdir", help="Log directory")
-    create_agent_parser.add_argument("--load", action="store_true", help="Auto-load the agent")
-    create_agent_parser.set_defaults(func=create_launch_agent_command)
-    
-    # Check launch agent command
-    check_agent_parser = agent_subparsers.add_parser("check", help="Check Launch Agent status")
-    check_agent_parser.add_argument("--name", help="Launch Agent name")
-    check_agent_parser.add_argument("--show-logs", action="store_true", help="Show log contents")
-    check_agent_parser.set_defaults(func=check_launch_agent_command)
-    
-    # Uninstall launch agent command
-    uninstall_agent_parser = agent_subparsers.add_parser("uninstall", help="Uninstall Launch Agent")
-    uninstall_agent_parser.add_argument("--name", help="Launch Agent name")
-    uninstall_agent_parser.set_defaults(func=uninstall_launch_agent_command)
-    
-    # Calendars command
-    calendars_parser = subparsers.add_parser('calendars', help='List all available calendars')
-    calendars_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output in JSON format"
-    )
-    calendars_parser.set_defaults(func=list_calendars_command)
-    
-    # Events command
-    events_parser = subparsers.add_parser('events', help='Get events from a calendar')
-    events_parser.add_argument(
-        "calendar",
-        help="Name of the calendar"
-    )
-    events_parser.add_argument(
-        "--start-date",
-        help="Start date in format YYYY-MM-DD"
-    )
-    events_parser.add_argument(
-        "--end-date",
-        help="End date in format YYYY-MM-DD"
-    )
-    events_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output in JSON format"
-    )
-    events_parser.set_defaults(func=get_events_command)
-    
-    # Create event command
-    create_parser = subparsers.add_parser('create', help='Create a new event')
-    create_parser.add_argument(
-        "calendar",
-        nargs='?',
-        help="Name of the calendar (default from .env DEFAULT_CALENDAR)"
-    )
-    create_parser.add_argument(
-        "summary",
-        help="Event title/summary"
-    )
-    create_parser.add_argument(
-        "--date",
-        default=datetime.datetime.now().strftime("%Y-%m-%d"),
-        help="Event date in format YYYY-MM-DD (default: today)"
-    )
-    create_parser.add_argument(
-        "--start-time",
-        default=datetime.datetime.now().strftime("%H:%M"),
-        help="Start time in format HH:MM (default: current time)"
-    )
-    create_parser.add_argument(
-        "--end-time",
-        help="End time in format HH:MM (calculated from duration if not provided)"
-    )
-    create_parser.add_argument(
-        "--duration",
-        type=int,
-        help="Duration in minutes (default from .env or 60)"
-    )
-    create_parser.add_argument(
-        "--location",
-        help="Event location"
-    )
-    create_parser.add_argument(
-        "--description",
-        help="Event description"
-    )
-    create_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output in JSON format"
-    )
-    create_parser.set_defaults(func=create_event_command)
-    
-    # Update event command
-    update_parser = subparsers.add_parser('update', help='Update an existing event')
-    update_parser.add_argument(
-        "calendar",
-        help="Name of the calendar"
-    )
-    update_parser.add_argument(
-        "event_id",
-        help="ID of the event to update"
-    )
-    update_parser.add_argument(
-        "--summary",
-        help="New event title/summary"
-    )
-    update_parser.add_argument(
-        "--date",
-        help="New event date in format YYYY-MM-DD"
-    )
-    update_parser.add_argument(
-        "--start-time",
-        help="New start time in format HH:MM"
-    )
-    update_parser.add_argument(
-        "--end-time",
-        help="New end time in format HH:MM"
-    )
-    update_parser.add_argument(
-        "--location",
-        help="New event location"
-    )
-    update_parser.add_argument(
-        "--description",
-        help="New event description"
-    )
-    update_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output in JSON format"
-    )
-    update_parser.set_defaults(func=update_event_command)
-    
-    # Delete event command
-    delete_parser = subparsers.add_parser('delete', help='Delete an event')
-    delete_parser.add_argument(
-        "calendar",
-        help="Name of the calendar"
-    )
-    delete_parser.add_argument(
-        "event_id",
-        help="ID of the event to delete"
-    )
-    delete_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output in JSON format"
-    )
-    delete_parser.set_defaults(func=delete_event_command)
-    
-    # Search events command
-    search_parser = subparsers.add_parser('search', help='Search for events')
-    search_parser.add_argument(
-        "query",
-        help="Search query"
-    )
-    search_parser.add_argument(
-        "--calendar",
-        help="Name of the calendar (default from .env DEFAULT_CALENDAR)"
-    )
-    search_parser.add_argument(
-        "--start-date",
-        help="Start date in format YYYY-MM-DD"
-    )
-    search_parser.add_argument(
-        "--end-date",
-        help="End date in format YYYY-MM-DD"
-    )
-    search_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output in JSON format"
-    )
-    search_parser.set_defaults(func=search_events_command)
+    # Setup CLI and Server parsers
+    create_cli_parser(subparsers)
+    create_server_parser(subparsers)
     
     # Parse arguments
     args = parser.parse_args()
@@ -576,221 +735,26 @@ def main():
     if hasattr(args, 'version') and args.version:
         show_version()
     
-    # Ensure a command was provided if not using --version
-    if not args.command:
+    # If no command was provided
+    if not hasattr(args, 'command') or not args.command:
         parser.print_help()
         sys.exit(1)
-        
+    
+    # If command is provided but no subcommand function
+    if not hasattr(args, 'func'):
+        if args.command == "cli":
+            subparsers.choices["cli"].print_help()
+        elif args.command == "server":
+            subparsers.choices["server"].print_help()
+        sys.exit(1)
+    
     # Run the corresponding function for the command
     args.func(args)
 
 
+# For backward compatibility with existing entry points
+cli_main = main
+
+
 if __name__ == "__main__":
     main()
-
-
-def install_server_main():
-    """
-    Entry point for the install-server command.
-    Handles reinstalling the package and setting up the launch agent.
-    """
-    parser = argparse.ArgumentParser(description="Install calendar-sse-mcp server and Launch Agent")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
-    # Install command (default - installs the launch agent)
-    install_parser = subparsers.add_parser("install", help="Install the calendar-sse-mcp server as a launch agent")
-    install_parser.add_argument("--port", type=int, default=27212, help="Server port (default: 27212)")
-    install_parser.add_argument("--logdir", default="/tmp", help="Log directory (default: /tmp)")
-    install_parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
-    install_parser.add_argument("--no-load", action="store_true", help="Don't load the agent after creation")
-    
-    # Reinstall command (unloads old agent, reinstalls package, reinstalls agent)
-    reinstall_parser = subparsers.add_parser("reinstall", help="Reinstall the calendar-sse-mcp package and launch agent")
-    reinstall_parser.add_argument("--port", type=int, default=27212, help="Server port (default: 27212)")
-    reinstall_parser.add_argument("--logdir", default="/tmp", help="Log directory (default: /tmp)")
-    reinstall_parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
-    reinstall_parser.add_argument("--no-load", action="store_true", help="Don't load the agent after creation")
-    
-    # Launch agent command (for backward compatibility)
-    launchagent_parser = subparsers.add_parser("launchagent", help="Install the Launch Agent")
-    launchagent_parser.add_argument("--port", type=int, help="Server port")
-    launchagent_parser.add_argument("--logdir", help="Log directory")
-    launchagent_parser.add_argument("--name", help="Launch Agent name")
-    launchagent_parser.add_argument("--load", action="store_true", help="Auto-load the agent")
-    
-    args = parser.parse_args()
-    
-    # If no command provided, default to install
-    if not args.command:
-        args.command = "install"
-        args.port = 27212
-        args.logdir = "/tmp"
-        args.name = "com.calendar-sse-mcp"
-        args.no_load = False
-    
-    # Handle reinstall command - unload agent if it exists, reinstall package, then reinstall agent
-    if args.command == "reinstall":
-        # Try to unload existing launch agent
-        agent_name = args.name or "com.calendar-sse-mcp"
-        print(f"Checking for existing launch agent: {agent_name}")
-        
-        # Uninstall the launch agent if it exists
-        success, message = uninstall_launch_agent(agent_name=agent_name)
-        print(message)
-        
-        # Reinstall the package
-        try:
-            # Check if uv is available
-            if shutil.which("uv"):
-                cmd = ["uv", "pip", "install", "--force-reinstall", "calendar-sse-mcp"]
-                print("Reinstalling calendar-sse-mcp from PyPI...")
-                subprocess.run(cmd, check=True)
-                print("Package reinstallation completed successfully!")
-            else:
-                print("Error: uv package manager not found.")
-                print("Please install uv first: https://github.com/astral-sh/uv")
-                sys.exit(1)
-        except subprocess.CalledProcessError as e:
-            print(f"Error during installation: {e}")
-            sys.exit(1)
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-            sys.exit(1)
-            
-        # Now install the launch agent
-        print(f"Setting up launch agent with port {args.port}...")
-        success, message, plist_path = create_launch_agent(
-            agent_name=args.name,
-            port=args.port,
-            log_dir=args.logdir,
-            auto_load=not args.no_load
-        )
-        
-        print(message)
-        
-        if not success:
-            sys.exit(1)
-    
-    # Handle the install command
-    elif args.command == "install":
-        # Just install the launch agent
-        print(f"Setting up launch agent with port {args.port}...")
-        success, message, plist_path = create_launch_agent(
-            agent_name=args.name,
-            port=args.port,
-            log_dir=args.logdir,
-            auto_load=not args.no_load
-        )
-        
-        print(message)
-        
-        if not success:
-            sys.exit(1)
-    
-    # Handle legacy launchagent command
-    elif args.command == "launchagent":
-        # Setup the launch agent
-        success, message, plist_path = create_launch_agent(
-            agent_name=args.name,
-            port=args.port,
-            log_dir=args.logdir,
-            auto_load=args.load
-        )
-        
-        print(message)
-        
-        if not success:
-            sys.exit(1)
-
-
-# --- New helper functions for launchctl ---
-def _get_launch_agent_plist_path(agent_name: Optional[str] = None) -> Path:
-    # ... (logic to determine plist path, similar to what's in check_launch_agent)
-    pass
-
-def _is_agent_loaded(agent_name: Optional[str] = None) -> bool:
-    # ... (logic using launchctl list | grep agent_name)
-    pass
-
-def start_server_agent_command(args: argparse.Namespace) -> None:
-    # Uses launchctl load <plist_path>
-    # Calls _get_launch_agent_plist_path
-    pass
-
-def stop_server_agent_command(args: argparse.Namespace) -> None:
-    # Uses launchctl unload <plist_path>
-    # Calls _get_launch_agent_plist_path
-    pass
-
-def restart_server_agent_command(args: argparse.Namespace) -> None:
-    # Calls stop, then start
-    pass
-
-def logs_server_command(args: argparse.Namespace) -> None:
-    # Adapt from check_launch_agent_command
-    # Add args.level (e.g., "error", "info", "all")
-    # Filter log output based on level (e.g. only show stderr for "error")
-    pass
-
-def install_server_sub_command(args: argparse.Namespace) -> None:
-    # Similar to create_launch_agent_command or parts of install_server_main
-    # Ensure it creates and loads the agent.
-    # Reuses create_launch_agent()
-    # Optionally calls start_server_agent_command
-    pass
-
-def uninstall_server_sub_command(args: argparse.Namespace) -> None:
-    # Calls uninstall_launch_agent_command
-    pass
-
-def update_server_sub_command(args: argparse.Namespace) -> None:
-    # Calls uninstall, then install
-    pass
-
-# --- New main entry point for 'server' script ---
-def server_cli_main() -> None:
-    parser = argparse.ArgumentParser(description="Manage the Calendar MCP server.")
-    subparsers = parser.add_subparsers(title="Commands", dest="command", required=True)
-
-    # install
-    install_parser = subparsers.add_parser("install", help="Install and configure the server as a launch agent.")
-    # ... add args like --port, --logdir, --name
-    install_parser.set_defaults(func=install_server_sub_command)
-
-    # uninstall
-    uninstall_parser = subparsers.add_parser("uninstall", help="Uninstall the server launch agent.")
-    # ... add args like --name
-    uninstall_parser.set_defaults(func=uninstall_server_sub_command)
-
-    # update
-    update_parser = subparsers.add_parser("update", help="Update the server (reinstall the launch agent).")
-    # ... add args like --port, --logdir, --name
-    update_parser.set_defaults(func=update_server_sub_command)
-
-    # start
-    start_parser = subparsers.add_parser("start", help="Start the server launch agent.")
-    # ... add args like --name
-    start_parser.set_defaults(func=start_server_agent_command)
-
-    # stop
-    stop_parser = subparsers.add_parser("stop", help="Stop the server launch agent.")
-    # ... add args like --name
-    stop_parser.set_defaults(func=stop_server_agent_command)
-
-    # restart
-    restart_parser = subparsers.add_parser("restart", help="Restart the server launch agent.")
-    # ... add args like --name
-    restart_parser.set_defaults(func=restart_server_agent_command)
-
-    # logs
-    logs_parser = subparsers.add_parser("logs", help="Show server logs.")
-    logs_parser.add_argument("--level", choices=["info", "error", "all"], default="all", help="Log level to display.")
-    logs_parser.add_argument("--name", help="The name of the launch agent (defaults to com.calendar-sse-mcp).")
-    # Potentially add --lines N
-    logs_parser.set_defaults(func=logs_server_command)
-
-    args = parser.parse_args()
-    args.func(args)
-
-# Modify existing install_server_main to be callable or remove if fully superseded
-# Remove or comment out the old install_server_main if its functionality is fully moved. 

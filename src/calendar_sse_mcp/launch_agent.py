@@ -116,6 +116,28 @@ def generate_launch_agent_plist(
     if working_dir is None:
         working_dir = str(Path.cwd())
     
+    # Check if this is a dev server (port 27213)
+    is_dev_server = port == 27213
+    
+    # Create program arguments array
+    program_args = [
+        f'<string>{python_exec}</string>',
+        '<string>-m</string>',
+        '<string>calendar_sse_mcp</string>',
+        '<string>server</string>',
+        '<string>run</string>'
+    ]
+    
+    # Add dev flag if this is a dev server
+    if is_dev_server:
+        program_args.append('<string>--dev</string>')
+    else:
+        # Otherwise use the explicit port argument
+        program_args.extend([
+            '<string>--port</string>',
+            f'<string>{port}</string>'
+        ])
+    
     # Create plist content
     plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -125,12 +147,7 @@ def generate_launch_agent_plist(
     <string>{agent_name}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{python_exec}</string>
-        <string>-m</string>
-        <string>calendar_sse_mcp</string>
-        <string>server</string>
-        <string>--port</string>
-        <string>{port}</string>
+        {chr(10)+'        '.join(program_args)}
     </array>
     <key>RunAtLoad</key>
     <true/>

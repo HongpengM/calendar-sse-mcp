@@ -196,43 +196,98 @@ def search_events(
     query: str,
     calendar_name: Optional[str] = None,
     start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    end_date: Optional[str] = None,
+    duration: Optional[str] = None
 ) -> str:
     """
-    Search for events in Calendar.app
+    Search for events in Calendar.app, optionally within a flexible date range.
     
     Args:
-        query: Search query (case-insensitive substring match)
-        calendar_name: (Optional) Specific calendar to search in
-        start_date: (Optional) Start date in format "yyyy-MM-dd"
-        end_date: (Optional) End date in format "yyyy-MM-dd"
+        query: Search query (case-insensitive substring match).
+               If empty, returns all events matching other criteria.
+        calendar_name: (Optional) Specific calendar to search in.
+        start_date: (Optional) Starting date in any format parseable by dateparser.
+                    Defaults to today if no end_date and no duration given for start_date logic.
+        end_date: (Optional) Ending date in any format parseable by dateparser.
+        duration: (Optional) Duration from start date or before end date,
+                  e.g., "3d", "1 week", "1 month".
+                  Default is "3d" if only start_date is given or if neither start_date nor end_date is given.
+                  See date parsing logic for details on how start_date, end_date, and duration interact.
         
     Returns:
         JSON string containing matching events
     """
     try:
-        # Handle date ranges by adjusting time components
-        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
-            start_date = f"{start_date}T00:00:00"
+        # Date parsing and duration logic from get_events_date_range
+        days = 3  # Default duration is 3 days
+        if duration:
+            duration_lower = duration.lower().strip()
+            num_str = ''.join(c for c in duration_lower if c.isdigit())
+            if num_str:
+                num = int(num_str)
+                if duration_lower.endswith('d') or 'day' in duration_lower:
+                    days = num
+                elif duration_lower.endswith('w') or 'week' in duration_lower:
+                    days = num * 7
+                elif duration_lower.endswith('m') or 'month' in duration_lower:
+                    days = num * 30  # Approximation for months
+        
+        start_dt: Optional[datetime] = None
+        end_dt: Optional[datetime] = None
+
+        if end_date and not start_date:
+            parsed_end_dt = dateparser.parse(end_date)
+            if not parsed_end_dt:
+                raise ValueError(f"Could not parse end date: {end_date}")
+            end_dt = parsed_end_dt
+            start_dt = end_dt - timedelta(days=days)
+        else:
+            if not start_date:
+                # Default to today if start_date is not provided
+                start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                parsed_start_dt = dateparser.parse(start_date)
+                if not parsed_start_dt:
+                    raise ValueError(f"Could not parse start date: {start_date}")
+                start_dt = parsed_start_dt
             
-        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
-            end_date = f"{end_date}T23:59:59"
-            
+            if end_date:
+                parsed_end_dt = dateparser.parse(end_date)
+                if not parsed_end_dt:
+                    raise ValueError(f"Could not parse end date: {end_date}")
+                end_dt = parsed_end_dt
+            else:
+                # Use duration if no end_date is provided
+                end_dt = start_dt + timedelta(days=days)
+        
+        if start_dt and end_dt and end_dt < start_dt:
+            raise ValueError("End date cannot be before start date")
+
+        start_iso_for_store = format_iso(start_dt) if start_dt else None
+        end_iso_for_store = format_iso(end_dt) if end_dt else None
+
+        # If after all logic, start_iso_for_store or end_iso_for_store is None,
+        # it means store.get_events will use its default (e.g. all future events)
+        # However, the logic above tries to ensure they are set, e.g. default 3 day window.
+        # If start_date, end_date, and duration are all None, this results in:
+        # start_dt = now, end_dt = start_dt + 3 days.
+
         store = CalendarStore(quiet=True)
         events = store.get_events(
             calendar_name=calendar_name,
-            start_date=start_date,
-            end_date=end_date
+            start_date=start_iso_for_store,
+            end_date=end_iso_for_store
         )
         
         # Filter events by query (case-insensitive)
-        query = query.lower()
+        # An empty query string will match all events due to '"" in event_field.lower()' being true
+        query_lower = query.lower()
         matching_events = [
             event for event in events
             if (
-                query in event["summary"].lower() or
-                query in (event["description"] or "").lower() or
-                query in (event["location"] or "").lower()
+                query_lower in event["summary"].lower() or
+                query_lower in (event["description"] or "").lower() or
+                query_lower in (event["location"] or "").lower()
             )
         ]
         
@@ -240,6 +295,8 @@ def search_events(
             "events": matching_events,
             "count": len(matching_events)
         }, ensure_ascii=False)
+    except ValueError as e:
+        return json.dumps({"error": f"Date error: {str(e)}"}, ensure_ascii=False)
     except CalendarStoreError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
     except Exception as e:
@@ -502,118 +559,6 @@ def search_events_prompt(
         return f"Failed to search events: {e}"
     except Exception as e:
         return f"Failed to search events: Unexpected error: {e}"
-
-
-@mcp.tool()
-def get_events_date_range(
-    calendar_name: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    duration: Optional[str] = None
-) -> str:
-    """
-    Get calendar events within a flexible date range with multiple ways to specify the range.
-    
-    Args:
-        calendar_name: Name of the calendar to get events from
-        start_date: Starting date in any format parseable by dateparser (defaults to today)
-        end_date: Ending date in any format parseable by dateparser
-        duration: Duration from start date or before end date, e.g. "3d", "1 week", "1 month"
-                 (default is "3d" if neither end_date nor duration is specified)
-    
-    The function supports three ways to specify a date range:
-    1. start_date only: Returns events from start_date to start_date + 3 days
-    2. start_date + duration: Returns events from start_date to start_date + duration
-    3. end_date + duration: Returns events from end_date - duration to end_date
-    
-    Returns:
-        JSON string containing events in the specified date range
-    """
-    try:
-        # Parse the duration if provided
-        days = 3  # Default duration is 3 days
-        if duration:
-            # Handle different duration formats
-            duration = duration.lower().strip()
-            if duration.endswith('d') or duration.endswith(' day') or duration.endswith(' days'):
-                # Extract the number part of the duration
-                num = ''.join(c for c in duration if c.isdigit())
-                if num:
-                    days = int(num)
-            elif duration.endswith('w') or duration.endswith(' week') or duration.endswith(' weeks'):
-                num = ''.join(c for c in duration if c.isdigit())
-                if num:
-                    days = int(num) * 7
-            elif duration.endswith('m') or duration.endswith(' month') or duration.endswith(' months'):
-                num = ''.join(c for c in duration if c.isdigit())
-                if num:
-                    days = int(num) * 30  # Approximation for months
-        
-        # Determine date range based on provided parameters
-        if end_date and not start_date:
-            # Case: end_date + duration (backwards from end_date)
-            end_dt = dateparser.parse(end_date)
-            if not end_dt:
-                raise ValueError(f"Could not parse end date: {end_date}")
-            start_dt = end_dt - timedelta(days=days)
-        else:
-            # Case: start_date only or start_date + duration
-            if not start_date:
-                start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            else:
-                start_dt = dateparser.parse(start_date)
-                if not start_dt:
-                    raise ValueError(f"Could not parse start date: {start_date}")
-            
-            if end_date:
-                end_dt = dateparser.parse(end_date)
-                if not end_dt:
-                    raise ValueError(f"Could not parse end date: {end_date}")
-            else:
-                # Use duration if no end_date is provided
-                end_dt = start_dt + timedelta(days=days)
-        
-        # Ensure dates are in correct order
-        if end_dt < start_dt:
-            raise ValueError("End date cannot be before start date")
-        
-        # Format dates as ISO strings for the calendar store
-        start_iso = format_iso(start_dt)
-        end_iso = format_iso(end_dt)
-        
-        # Get events from the calendar
-        store = CalendarStore(quiet=True)
-        events = store.get_events(
-            calendar_name=calendar_name,
-            start_date=start_iso,
-            end_date=end_iso
-        )
-        
-        return json.dumps({
-            "success": True,
-            "events": events,
-            "count": len(events),
-            "date_range": {
-                "start_date": start_iso,
-                "end_date": end_iso,
-                "days": (end_dt - start_dt).days
-            }
-        }, ensure_ascii=False)
-    except ValueError as e:
-        return json.dumps({
-            "success": False,
-            "error": f"Date error: {str(e)}"
-        }, ensure_ascii=False)
-    except CalendarStoreError as e:
-        return json.dumps({
-            "success": False,
-            "error": str(e)
-        }, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({
-            "success": False,
-            "error": f"Unexpected error: {str(e)}"
-        }, ensure_ascii=False)
 
 
 # JSON API endpoints -------------------------------------------------------

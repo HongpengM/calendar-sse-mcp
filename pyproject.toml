@@ -1,6 +1,6 @@
 [project]
 name = "calendar-sse-mcp"
-version = "0.1.12"
+version = "0.1.13"
 description = "A Model Context Protocol server for macOS Calendar.app"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,7 +19,7 @@ dependencies = [
 
 [project.scripts]
 calendar-mcp = "calendar_sse_mcp.__main__:main"
-install-server = "calendar_sse_mcp.__main__:install_server_main"
+server = "calendar_sse_mcp.__main__:server_cli_main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

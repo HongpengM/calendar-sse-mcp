@@ -56,16 +56,16 @@ The easiest way to install and run the calendar service is with uvx:
 
 ```bash
 # Install the server as a Launch Agent with default settings (port 27212)
-uvx --from calendar-sse-mcp install-server install
+uvx --from calendar-sse-mcp server install
 
 # Customize the installation
-uvx --from calendar-sse-mcp install-server install --port 5000 --logdir ~/logs
+uvx --from calendar-sse-mcp server install --port 5000 --logdir ~/logs
 
-# Reinstall the package and launch agent (unloads existing agent first)
-uvx --from calendar-sse-mcp install-server reinstall
+# Update the package and reinstall the launch agent
+uvx --refresh --from calendar-sse-mcp server update
 
-# Update to the latest version (refresh the uvx cache and reinstall)
-uvx --refresh --from calendar-sse-mcp install-server reinstall
+# Uninstall the server launch agent
+uvx --from calendar-sse-mcp server uninstall
 ```
 
 The installation process:
@@ -118,36 +118,35 @@ The package provides a comprehensive command-line interface:
 ```bash
 # Using uvx (recommended)
 uvx --from calendar-sse-mcp calendar-mcp [command] [options]
+uvx --from calendar-sse-mcp server [subcommand] [options]
 
 # Or directly with the module
 python -m calendar_sse_mcp [command] [options]
+python -m calendar_sse_mcp.server [subcommand] [options] # Assuming server_cli_main is in server.py or a new file
 ```
 
 ### Reinstalling the package
-
+This is now handled by the `update` subcommand of the `server` script.
 ```bash
-# Simple reinstall (also unloads existing launch agent and reinstalls it)
-uvx --from calendar-sse-mcp install-server reinstall
+# Update to the latest version (refresh the uvx cache and reinstall launch agent)
+uvx --refresh --from calendar-sse-mcp server update
 
-# Reinstall with custom port
-uvx --from calendar-sse-mcp install-server reinstall --port 5000 --logdir ~/logs
-
-# Update to the latest version (refresh the uvx cache and reinstall)
-uvx --refresh --from calendar-sse-mcp install-server reinstall
+# Update with custom port
+uvx --refresh --from calendar-sse-mcp server update --port 5000 --logdir ~/logs
 ```
 
 ### Running the server
-
+To run the server in the foreground (e.g., for debugging):
 ```bash
-# Start the MCP server
+# Start the MCP server in the foreground
 uvx --from calendar-sse-mcp calendar-mcp server
 
 # Specify host and port
 uvx --from calendar-sse-mcp calendar-mcp server --host 0.0.0.0 --port 5000
 ```
+For background service management, see "Managing the Server as a Launch Agent" below.
 
 ### Installing as a Claude MCP server
-
 ```bash
 # Install as a Claude MCP server
 uvx --from calendar-sse-mcp calendar-mcp install
@@ -161,29 +160,30 @@ uvx --from calendar-sse-mcp calendar-mcp install --name "My Calendar"
 The package includes a built-in command to create and install a Launch Agent:
 
 ```bash
-# Create and install the Launch Agent (using install-server)
-uvx --from calendar-sse-mcp install-server launchagent
+# Install and start the Launch Agent (default settings)
+uvx --from calendar-sse-mcp server install
 
-# Create, install, and immediately load the Agent
-uvx --from calendar-sse-mcp install-server launchagent --load
+# Customize port and log directory during installation
+uvx --from calendar-sse-mcp server install --port 5000 --logdir ~/logs
 
-# Customize port and log directory
-uvx --from calendar-sse-mcp install-server launchagent --port 5000 --logdir ~/logs
+# Start the Launch Agent (if not already running)
+uvx --from calendar-sse-mcp server start
 
-# Alternative using calendar-mcp command
-uvx --from calendar-sse-mcp calendar-mcp agent create
+# Stop the Launch Agent
+uvx --from calendar-sse-mcp server stop
 
-# Check the status of the Launch Agent
-uvx --from calendar-sse-mcp calendar-mcp agent check
+# Restart the Launch Agent
+uvx --from calendar-sse-mcp server restart
 
-# Show logs
-uvx --from calendar-sse-mcp calendar-mcp agent check --show-logs
+# Check the status and view logs for the Launch Agent
+uvx --from calendar-sse-mcp server logs
+uvx --from calendar-sse-mcp server logs --level error # Show only error logs
 
 # Uninstall the Launch Agent
-uvx --from calendar-sse-mcp calendar-mcp agent uninstall
+uvx --from calendar-sse-mcp server uninstall
 
-# Reinstall the Launch Agent (uninstall and create again)
-uvx --from calendar-sse-mcp calendar-mcp agent uninstall && uvx --from calendar-sse-mcp calendar-mcp agent create --load
+# Update the server (reinstalls package and Launch Agent)
+uvx --refresh --from calendar-sse-mcp server update
 ```
 
 ### Managing Calendar Events
@@ -273,8 +273,8 @@ See [API Endpoints Documentation](docs/api_endpoints.md) for detailed informatio
 
 ## Documentation
 
-- [Launch Agent Setup](docs/launch_agent_setup.md) - How to run the server as a background service
-- [CLI Tools](docs/cli_tools.md) - Comprehensive command-line tool reference
+- [Launch Agent Setup](docs/launch_agent_setup.md) - How to run the server as a background service using the `server` command.
+- [CLI Tools](docs/cli_tools.md) - Comprehensive command-line tool reference for `calendar-mcp`.
 - [Date Handling](docs/date_handling.md) - Information about flexible date parsing with dateparser
 
 ## Date Parsing

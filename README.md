@@ -31,7 +31,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for in
 Clone the repository and install:
 
 ```bash
-git clone https://github.com/yourusername/calendar-sse-mcp.git
+git clone https://github.com/HongpengM/calendar-sse-mcp.git # or your fork
 cd calendar-sse-mcp
 pip install -e .
 ```
@@ -50,7 +50,9 @@ Note: This package will be available on PyPI in the future.
 uv pip install calendar-sse-mcp
 ```
 
-### Using uvx
+## Running the Server
+
+### Using `uvx` install the Launch Agent and run commands
 
 The easiest way to install and run the calendar service is with uvx:
 
@@ -88,6 +90,31 @@ The installation process:
 1. Sets up a launch agent to run the server in the background
 2. Configures it to start automatically when you log in
 3. Makes the server accessible at http://localhost:27212 by default
+
+### Run from globally installed package or repository
+
+Alternative, you could also run an alternative instance from the pip installed or the local repository. With installing the server first: 
+
+
+```bash
+
+# Install the server first 
+pip install -e . # In your package repository, install the package (which you will have `calendar-mcp` as a shell command if you set the pip packages in PATH)
+calendar-mcp server install # This install the server as a Launch Agent
+
+# Then you could run commandline commands
+calendar-mcp cli --help
+```
+
+If you don't want to install the package in global space, you could also run directly from the repository
+
+```bash
+
+python -m src.calendar_sse_mcp server install # This will not install the package in global
+
+python -m src.calendar_sse_mcp cli --help
+```
+
 
 ## Claude Configuration
 

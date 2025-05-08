@@ -8,4 +8,4 @@ from .models import (
     CalendarList, EventList, ApiResponse
 )
 
-__version__ = "0.1.14" 
+__version__ = "0.1.15" 

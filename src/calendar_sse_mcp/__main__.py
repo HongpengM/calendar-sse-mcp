@@ -187,11 +187,27 @@ def add_restart_parser(subparsers):
 def add_install_parser(subparsers):
     """Add the install command parser"""
     parser = subparsers.add_parser("install", help="Install the server as a LaunchAgent")
+    # Basic options
     parser.add_argument("--port", type=int, default=27212, help="Server port (default: 27212)")
+    parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     parser.add_argument("--logdir", default="/tmp", help="Log directory (default: /tmp)")
     parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    
+    # Installation options
     parser.add_argument("--no-load", action="store_true", help="Don't load the agent after creation")
     parser.add_argument("--dev", action="store_true", help="Install as development server on port 27213")
+    parser.add_argument("--working-dir", help="Working directory for the server (default: current directory)")
+    parser.add_argument("--python-path", help="Path to Python executable (default: auto-detect)")
+    
+    # Environment variables
+    parser.add_argument("--env", "-e", action="append", help="Additional environment variables in the format KEY=VALUE")
+    
+    # Auto-start options
+    parser.add_argument("--run-at-login", action="store_true", default=True, help="Run the server at login (default: True)")
+    parser.add_argument("--no-run-at-login", action="store_false", dest="run_at_login", help="Don't run the server at login")
+    parser.add_argument("--keep-alive", action="store_true", default=True, help="Keep the server alive (restart on crash, default: True)")
+    parser.add_argument("--no-keep-alive", action="store_false", dest="keep_alive", help="Don't restart the server on crash")
+    
     parser.set_defaults(func=server_install_command)
     return parser
 
@@ -200,7 +216,15 @@ def add_uninstall_parser(subparsers):
     """Add the uninstall command parser"""
     parser = subparsers.add_parser("uninstall", help="Uninstall the server LaunchAgent")
     parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--dev", action="store_true", help="Uninstall development server (on port 27213)")
     parser.set_defaults(func=server_uninstall_command)
+    return parser
+
+
+def add_uninstall_dev_parser(subparsers):
+    """Add the uninstall-dev command parser"""
+    parser = subparsers.add_parser("uninstall-dev", help="Uninstall the development server LaunchAgent")
+    parser.set_defaults(func=server_uninstall_dev_command)
     return parser
 
 
@@ -235,6 +259,7 @@ def create_server_parser(subparsers):
     add_restart_parser(server_subparsers)
     add_install_parser(server_subparsers)
     add_uninstall_parser(server_subparsers)
+    add_uninstall_dev_parser(server_subparsers)
     add_logs_parser(server_subparsers)
     add_run_parser(server_subparsers)
     
@@ -613,7 +638,14 @@ def server_install_command(args: argparse.Namespace) -> None:
 
 def server_uninstall_command(args: argparse.Namespace) -> None:
     """Uninstall the server Launch Agent"""
-    agent_name = args.name
+    # If --dev is specified, use the dev agent name
+    if hasattr(args, 'dev') and args.dev:
+        agent_name = "com.calendar-sse-mcp.dev"
+        print(f"Uninstalling DEVELOPMENT server agent '{agent_name}'...")
+    else:
+        agent_name = args.name
+        print(f"Uninstalling server agent '{agent_name}'...")
+    
     success, message = uninstall_launch_agent(agent_name=agent_name)
     print(message)
     
@@ -712,6 +744,18 @@ def server_logs_command(args: argparse.Namespace) -> None:
     
     if not status["stdout_log"] and not status["stderr_log"]:
         print("No log files found.")
+
+
+def server_uninstall_dev_command(args: argparse.Namespace) -> None:
+    """Uninstall the development server Launch Agent"""
+    agent_name = "com.calendar-sse-mcp.dev"
+    print(f"Uninstalling development server agent '{agent_name}'...")
+    
+    success, message = uninstall_launch_agent(agent_name=agent_name)
+    print(message)
+    
+    if not success:
+        sys.exit(1)
 
 
 # ----- Main Entry Point -----

@@ -90,9 +90,13 @@ def get_agent_name(name: Optional[str] = None) -> str:
 def generate_launch_agent_plist(
     agent_name: str,
     port: int = 27212,
+    host: str = "127.0.0.1",
     log_dir: str = "/tmp",
     python_exec: Optional[str] = None,
-    working_dir: Optional[str] = None
+    working_dir: Optional[str] = None,
+    run_at_login: bool = True,
+    keep_alive: bool = True,
+    env_vars: Optional[Dict[str, str]] = None
 ) -> str:
     """
     Generate a Launch Agent plist for the Calendar MCP server
@@ -100,9 +104,13 @@ def generate_launch_agent_plist(
     Args:
         agent_name: Name of the launch agent
         port: Server port
+        host: Server host
         log_dir: Directory for log files
         python_exec: Path to Python executable (detected if None)
         working_dir: Working directory (current directory if None)
+        run_at_login: Whether to run at login
+        keep_alive: Whether to keep alive/restart on crash
+        env_vars: Additional environment variables
         
     Returns:
         Launch Agent plist XML content
@@ -132,11 +140,30 @@ def generate_launch_agent_plist(
     if is_dev_server:
         program_args.append('<string>--dev</string>')
     else:
-        # Otherwise use the explicit port argument
+        # Otherwise use the explicit port and host arguments
         program_args.extend([
             '<string>--port</string>',
-            f'<string>{port}</string>'
+            f'<string>{port}</string>',
+            '<string>--host</string>',
+            f'<string>{host}</string>'
         ])
+    
+    # Environment variables
+    env_vars_dict = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        "SERVER_PORT": str(port),
+        "SERVER_HOST": host
+    }
+    
+    # Add additional environment variables
+    if env_vars:
+        env_vars_dict.update(env_vars)
+    
+    # Generate environment variables XML
+    env_vars_xml = "\n        ".join([
+        f'<key>{key}</key>\n        <string>{value}</string>'
+        for key, value in env_vars_dict.items()
+    ])
     
     # Create plist content
     plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -150,9 +177,9 @@ def generate_launch_agent_plist(
         {chr(10)+'        '.join(program_args)}
     </array>
     <key>RunAtLoad</key>
-    <true/>
+    <{'true' if run_at_login else 'false'}/>
     <key>KeepAlive</key>
-    <true/>
+    <{'true' if keep_alive else 'false'}/>
     <key>WorkingDirectory</key>
     <string>{working_dir}</string>
     <key>StandardOutPath</key>
@@ -161,10 +188,7 @@ def generate_launch_agent_plist(
     <string>{log_dir}/{agent_name}-stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-        <key>SERVER_PORT</key>
-        <string>{port}</string>
+        {env_vars_xml}
     </dict>
 </dict>
 </plist>
@@ -175,7 +199,13 @@ def generate_launch_agent_plist(
 def create_launch_agent(
     agent_name: Optional[str] = None,
     port: Optional[int] = None,
+    host: str = "127.0.0.1",
     log_dir: Optional[str] = None,
+    python_exec: Optional[str] = None,
+    working_dir: Optional[str] = None,
+    run_at_login: bool = True,
+    keep_alive: bool = True,
+    env_vars: Optional[Dict[str, str]] = None,
     auto_load: bool = False
 ) -> Tuple[bool, str, Optional[Path]]:
     """
@@ -184,7 +214,13 @@ def create_launch_agent(
     Args:
         agent_name: Optional custom name for the agent
         port: Optional custom port
+        host: Server host to bind to
         log_dir: Optional custom log directory
+        python_exec: Path to Python executable
+        working_dir: Working directory for the server
+        run_at_login: Whether to run at login
+        keep_alive: Whether to keep alive/restart on crash
+        env_vars: Additional environment variables
         auto_load: Whether to automatically load the agent
         
     Returns:
@@ -198,6 +234,8 @@ def create_launch_agent(
         name = get_agent_name(agent_name)
         port_num = port or int(os.environ.get("SERVER_PORT", "27212"))
         logs_dir = log_dir or paths["log_dir"]
+        python_path = python_exec or paths["python_exec"]
+        work_dir = working_dir or str(paths["current_dir"])
         
         # Create the LaunchAgents directory if it doesn't exist
         paths["launch_agents_dir"].mkdir(parents=True, exist_ok=True)
@@ -209,9 +247,13 @@ def create_launch_agent(
         plist_content = generate_launch_agent_plist(
             agent_name=name,
             port=port_num,
+            host=host,
             log_dir=logs_dir,
-            python_exec=paths["python_exec"],
-            working_dir=str(paths["current_dir"])
+            python_exec=python_path,
+            working_dir=work_dir,
+            run_at_login=run_at_login,
+            keep_alive=keep_alive,
+            env_vars=env_vars
         )
         
         # Write the plist file

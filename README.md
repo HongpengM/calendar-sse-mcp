@@ -1,6 +1,8 @@
 # Calendar SSE MCP
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for interacting with macOS Calendar.app through AppleScript.
+[English](README.md) | [中文](README_CN.md) | [GitHub](https://github.com/HongpengM/calendar-sse-mcp)
+
+A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for interacting with macOS Calendar.
 
 ## Features
 

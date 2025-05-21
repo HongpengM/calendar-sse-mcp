@@ -133,13 +133,18 @@ def get_calendar_events_by_date_range(
         JSON string containing events
     """
     try:
+        if start_date == end_date: # Shift end_date to the end of the day
+            end_date = f"{end_date}T23:59:59"
+            
+        
         # Handle date ranges by adjusting time components
         if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
             start_date = f"{start_date}T00:00:00"
             
         if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
             end_date = f"{end_date}T23:59:59"
-            
+        
+        
         store = CalendarStore(quiet=True)
         events = store.get_events(
             calendar_name=calendar_name,
@@ -269,6 +274,8 @@ def search_events(
                 if not parsed_end_dt:
                     raise ValueError(f"Could not parse end date: {end_date}")
                 end_dt = parsed_end_dt
+                if start_dt == end_dt:
+                    end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999)
             else:
                 # Use duration if no end_date is provided
                 end_dt = start_dt + timedelta(days=days)

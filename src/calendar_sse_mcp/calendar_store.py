@@ -1,9 +1,12 @@
 """
 EventKit-based calendar store for accessing macOS Calendar.app events.
 """
+import os
+import subprocess
 import sys
 import time
 import datetime
+import threading
 from typing import List, Dict, Any, Optional, Tuple
 
 from EventKit import (
@@ -38,58 +41,163 @@ class CalendarStore:
         self.authorized = False
         self.quiet = quiet
         self.port = port
+        self._last_health_check = 0
+        self._auth_lock = threading.RLock()
         self.request_authorization()
         
         if not self.quiet:
             print(f"Using server on port {self.port}", file=sys.stderr)
 
+    def is_healthy(self) -> bool:
+        """
+        Check if the calendar store is healthy and functional.
+        
+        This performs a lightweight health check that can detect:
+        - Authorization expiration
+        - EventKit store staleness (e.g., after system sleep)
+        - General connectivity issues
+        
+        Returns:
+            True if the store is healthy, False otherwise
+        """
+        try:
+            with self._auth_lock:
+                # Check authorization status first
+                if not self.authorized:
+                    return False
+                
+                # Try to access calendars - this will fail if EventKit is stale
+                calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent)
+                if calendars is None:
+                    return False
+                
+                # Try to get calendar count to ensure we can enumerate them
+                calendar_count = len(calendars)
+                
+                # Update last health check timestamp
+                self._last_health_check = time.time()
+                
+                return True
+                
+        except Exception as e:
+            if not self.quiet:
+                print(f"Health check failed: {e}", file=sys.stderr)
+            return False
+
+    def refresh_if_needed(self) -> bool:
+        """
+        Refresh the EventKit store if it appears stale or unhealthy.
+        
+        This should be called before critical operations to ensure
+        the store is in good condition, especially after potential
+        system sleep or long idle periods.
+        
+        Returns:
+            True if refresh was successful or not needed, False if failed
+        """
+        try:
+            # Check if health check is recent (within last 30 seconds)
+            current_time = time.time()
+            if current_time - self._last_health_check < 30:
+                return True
+            
+            # Perform health check
+            if self.is_healthy():
+                return True
+            
+            if not self.quiet:
+                print("Calendar store appears stale, attempting refresh...", file=sys.stderr)
+            
+            # Try to refresh authorization
+            with self._auth_lock:
+                # Reset authorization state
+                self.authorized = False
+                
+                # Create a new EventKit store
+                self.event_store = EKEventStore.alloc().init()
+                
+                # Request authorization again
+                return self.request_authorization()
+                
+        except Exception as e:
+            if not self.quiet:
+                print(f"Failed to refresh calendar store: {e}", file=sys.stderr)
+            return False
+
     def request_authorization(self) -> bool:
         """
-        Request access to calendars.
+        Request access to calendars with improved error handling.
         
         Returns:
             True if authorization was granted, False otherwise
         """
-        if not self.quiet:
-            print("Requesting access to your calendars...", file=sys.stderr)
-        
-        # Authorization result holder
-        result = {"authorized": False, "complete": False}
-        
-        # Define callback
-        def auth_callback(granted: bool, error: Any) -> None:
-            result["authorized"] = granted
-            result["complete"] = True
-            if error and not self.quiet:
-                print(f"Calendar authorization error: {error}", file=sys.stderr)
-        
-        # Request access to calendars
-        self.event_store.requestAccessToEntityType_completion_(EKEntityTypeEvent, auth_callback)
-        
-        # Wait for authorization callback to complete
-        timeout = 10  # seconds
-        start_time = time.time()
-        
-        while not result["complete"]:
-            # Run the run loop for a short time to process callbacks
-            NSRunLoop.currentRunLoop().runMode_beforeDate_(
-                NSDefaultRunLoopMode, NSDate.dateWithTimeIntervalSinceNow_(0.1)
-            )
+        with self._auth_lock:
+            if not self.quiet:
+                print("Requesting access to your calendars...", file=sys.stderr)
             
-            # Check for timeout
-            if time.time() - start_time > timeout:
+            # Authorization result holder
+            result = {"authorized": False, "complete": False}
+            
+            # Define callback
+            def auth_callback(granted: bool, error: Any) -> None:
+                result["authorized"] = granted
+                result["complete"] = True
+                if error and not self.quiet:
+                    print(f"Calendar authorization error: {error}", file=sys.stderr)
+            
+            try:
+                # Request access to calendars
+                self.event_store.requestAccessToEntityType_completion_(EKEntityTypeEvent, auth_callback)
+                
+                # Wait for authorization callback to complete
+                timeout = 15  # Increased timeout for better reliability
+                start_time = time.time()
+                
+                while not result["complete"]:
+                    # Run the run loop for a short time to process callbacks
+                    NSRunLoop.currentRunLoop().runMode_beforeDate_(
+                        NSDefaultRunLoopMode, NSDate.dateWithTimeIntervalSinceNow_(0.1)
+                    )
+                    
+                    # Check for timeout
+                    if time.time() - start_time > timeout:
+                        if not self.quiet:
+                            print("Timed out waiting for authorization", file=sys.stderr)
+                        break
+                
+                self.authorized = result["authorized"]
+                
+                if self.authorized:
+                    self._last_health_check = time.time()
+                    if not self.quiet:
+                        print("Calendar access authorized", file=sys.stderr)
+                elif not self.quiet:
+                    print("Calendar access denied", file=sys.stderr)
+                
+                return self.authorized
+                
+            except Exception as e:
                 if not self.quiet:
-                    print("Timed out waiting for authorization", file=sys.stderr)
-                break
+                    print(f"Authorization request failed: {e}", file=sys.stderr)
+                self.authorized = False
+                return False
+
+    def _check_authorization(self) -> None:
+        """
+        Check if the store is authorized and refresh if needed.
         
-        self.authorized = result["authorized"]
+        This method now includes automatic refresh attempts before
+        raising errors, making it more resilient to temporary issues.
         
-        if self.authorized and not self.quiet:
-            print("Calendar access authorized", file=sys.stderr)
-        elif not self.authorized and not self.quiet:
-            print("Calendar access denied", file=sys.stderr)
-        
-        return self.authorized
+        Raises:
+            CalendarStoreError: If not authorized to access calendars
+        """
+        # Try to refresh if not authorized or unhealthy
+        if not self.authorized or not self.is_healthy():
+            if not self.refresh_if_needed():
+                if not self.quiet:
+                    print("Not authorized to access calendars", file=sys.stderr)
+                raise CalendarStoreError("Not authorized to access calendars")
 
     def get_all_calendars(self) -> List[str]:
         """
@@ -103,20 +211,19 @@ class CalendarStore:
         """
         self._check_authorization()
         
-        calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent)
-        return [calendar.title() for calendar in calendars]
-
-    def _check_authorization(self) -> None:
-        """
-        Check if the store is authorized and raise an error if not.
-        
-        Raises:
-            CalendarStoreError: If not authorized to access calendars
-        """
-        if not self.authorized:
-            if not self.quiet:
-                print("Not authorized to access calendars", file=sys.stderr)
-            raise CalendarStoreError("Not authorized to access calendars")
+        try:
+            calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent)
+            return [calendar.title() for calendar in calendars]
+        except Exception as e:
+            # If operation fails, try refreshing once and retry
+            if self.refresh_if_needed():
+                try:
+                    calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent)
+                    return [calendar.title() for calendar in calendars]
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to get calendars after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to get calendars: {e}")
 
     def _get_calendar_by_name(self, calendar_name: str) -> Optional[EKCalendar]:
         """
@@ -214,6 +321,41 @@ class CalendarStore:
         """
         self._check_authorization()
         
+        try:
+            return self._get_events_impl(calendar_name, start_date, end_date)
+        except CalendarStoreError:
+            # Re-raise CalendarStoreError as-is
+            raise
+        except Exception as e:
+            # For other exceptions, try refreshing once and retry
+            if self.refresh_if_needed():
+                try:
+                    return self._get_events_impl(calendar_name, start_date, end_date)
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to get events after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to get events: {e}")
+
+    def _get_events_impl(
+        self,
+        calendar_name: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Internal implementation of get_events with the actual logic.
+        
+        Args:
+            calendar_name: Optional name of calendar to get events from
+            start_date: Optional start date in format 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS'
+            end_date: Optional end date in format 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS'
+            
+        Returns:
+            List of event dictionaries
+            
+        Raises:
+            CalendarStoreError: If calendar not found
+        """
         # Convert start date to NSDate
         ns_start_date = self._date_to_nsdate(start_date, is_end_date=False)
         
@@ -391,7 +533,34 @@ class CalendarStore:
             CalendarStoreError: If creation fails for any reason
         """
         self._check_authorization()
-            
+        
+        try:
+            return self._create_event_impl(calendar_name, summary, start_date, end_date, location, description)
+        except CalendarStoreError:
+            # Re-raise CalendarStoreError as-is
+            raise
+        except Exception as e:
+            # For other exceptions, try refreshing once and retry
+            if self.refresh_if_needed():
+                try:
+                    return self._create_event_impl(calendar_name, summary, start_date, end_date, location, description)
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to create event after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to create event: {e}")
+
+    def _create_event_impl(
+        self,
+        calendar_name: str,
+        summary: str,
+        start_date: str,
+        end_date: str,
+        location: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> str:
+        """
+        Internal implementation of create_event.
+        """
         # Get the calendar
         calendar = self._get_calendar_by_name(calendar_name)
         if not calendar:
@@ -428,7 +597,7 @@ class CalendarStore:
             raise CalendarStoreError(f"Failed to create event: {error_str}")
             
         return event.eventIdentifier()
-            
+
     def update_event(
         self,
         event_id: str,
@@ -458,7 +627,35 @@ class CalendarStore:
             CalendarStoreError: If update fails for any reason
         """
         self._check_authorization()
-            
+        
+        try:
+            return self._update_event_impl(event_id, calendar_name, summary, start_date, end_date, location, description)
+        except CalendarStoreError:
+            # Re-raise CalendarStoreError as-is
+            raise
+        except Exception as e:
+            # For other exceptions, try refreshing once and retry
+            if self.refresh_if_needed():
+                try:
+                    return self._update_event_impl(event_id, calendar_name, summary, start_date, end_date, location, description)
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to update event after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to update event: {e}")
+
+    def _update_event_impl(
+        self,
+        event_id: str,
+        calendar_name: str,
+        summary: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None, 
+        location: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> bool:
+        """
+        Internal implementation of update_event.
+        """
         # Get the calendar
         calendar = self._get_calendar_by_name(calendar_name)
         if not calendar:
@@ -506,7 +703,7 @@ class CalendarStore:
             raise CalendarStoreError(f"Failed to update event: {error_str}")
             
         return True
-            
+
     def delete_event(self, event_id: str, calendar_name: str) -> bool:
         """
         Delete an event.
@@ -522,7 +719,26 @@ class CalendarStore:
             CalendarStoreError: If deletion fails for any reason
         """
         self._check_authorization()
-            
+        
+        try:
+            return self._delete_event_impl(event_id, calendar_name)
+        except CalendarStoreError:
+            # Re-raise CalendarStoreError as-is
+            raise
+        except Exception as e:
+            # For other exceptions, try refreshing once and retry
+            if self.refresh_if_needed():
+                try:
+                    return self._delete_event_impl(event_id, calendar_name)
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to delete event after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to delete event: {e}")
+
+    def _delete_event_impl(self, event_id: str, calendar_name: str) -> bool:
+        """
+        Internal implementation of delete_event.
+        """
         # Get the calendar
         calendar = self._get_calendar_by_name(calendar_name)
         if not calendar:

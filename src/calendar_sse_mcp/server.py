@@ -17,6 +17,7 @@ import os
 from typing import Dict, List, Optional, Union, Any
 import dateparser
 from datetime import datetime, timedelta
+import sys
 
 from mcp.server.fastmcp import FastMCP
 
@@ -32,6 +33,79 @@ mcp = FastMCP(
     host=os.environ.get("SERVER_HOST", "127.0.0.1")
 )
 
+# Initialize a global calendar store instance to avoid authorization conflicts
+# This prevents the "Received request before initialization was complete" error
+# by ensuring calendar authorization is completed before the server accepts requests
+_global_calendar_store: Optional[CalendarStore] = None
+_store_lock = None  # Will be initialized as threading.RLock() when needed
+
+def get_calendar_store() -> CalendarStore:
+    """
+    Get the global calendar store instance with health checking and auto-recreation.
+    
+    This function implements robust maintenance of the EventKit instance:
+    - Health checks on each access to detect stale/invalid stores
+    - Auto-recreation when authorization expires or system resumes from sleep
+    - Thread-safe access with proper locking
+    
+    Returns:
+        The global CalendarStore instance
+        
+    Raises:
+        CalendarStoreError: If unable to create or authorize calendar access
+    """
+    global _global_calendar_store, _store_lock
+    
+    # Initialize the lock on first use (avoids import order issues)
+    if _store_lock is None:
+        import threading
+        _store_lock = threading.RLock()
+    
+    with _store_lock:
+        # Check if we need to create or recreate the store
+        needs_recreation = False
+        
+        if _global_calendar_store is None:
+            needs_recreation = True
+        else:
+            # Perform health check on existing store
+            try:
+                # Quick health check: try to get calendars list
+                # This will fail if authorization expired or EventKit is stale
+                calendars = _global_calendar_store.get_all_calendars()
+                
+                # Additional check: verify the store is still authorized
+                if not _global_calendar_store.authorized:
+                    print("Calendar store authorization expired, recreating...", file=sys.stderr)
+                    needs_recreation = True
+                    
+            except CalendarStoreError as e:
+                print(f"Calendar store health check failed: {e}, recreating...", file=sys.stderr)
+                needs_recreation = True
+            except Exception as e:
+                print(f"Calendar store health check error: {e}, recreating...", file=sys.stderr)
+                needs_recreation = True
+        
+        # Create or recreate the store if needed
+        if needs_recreation:
+            try:
+                print("Creating new calendar store instance...", file=sys.stderr)
+                _global_calendar_store = CalendarStore(quiet=True)
+                
+                # Verify the new store is working
+                if not _global_calendar_store.authorized:
+                    raise CalendarStoreError("Failed to authorize calendar access")
+                
+                # Test basic functionality
+                calendars = _global_calendar_store.get_all_calendars()
+                print(f"Calendar store created successfully with {len(calendars)} calendars", file=sys.stderr)
+                
+            except Exception as e:
+                _global_calendar_store = None
+                raise CalendarStoreError(f"Failed to create calendar store: {e}")
+        
+        return _global_calendar_store
+
 # Main entry point ---------------------------------------------------------
 
 if __name__ == "__main__":
@@ -40,6 +114,11 @@ if __name__ == "__main__":
     transport = os.environ.get("SERVER_TRANSPORT", "sse")
     
     print(f"Server configured with port={port}, transport={transport}")
+    
+    # Initialize the calendar store early to handle authorization
+    print("Initializing calendar access...")
+    get_calendar_store()
+    print("Calendar access initialized.")
     
     # Run the server with the specified transport
     mcp.run(transport=transport)
@@ -56,7 +135,7 @@ def list_calendars() -> str:
         JSON string containing calendar names
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         calendars = store.get_all_calendars()
         return json.dumps(calendars, ensure_ascii=False)
     except CalendarStoreError as e:
@@ -78,7 +157,7 @@ def get_calendar_info(name: str) -> str:
     """
     # For now, we just return basic information
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         calendars = store.get_all_calendars()
         
         if name not in calendars:
@@ -106,7 +185,7 @@ def get_calendar_events(calendar_name: str) -> str:
         JSON string containing events
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         events = store.get_events(calendar_name=calendar_name)
         return json.dumps(events, ensure_ascii=False)
     except CalendarStoreError as e:
@@ -145,7 +224,7 @@ def get_calendar_events_by_date_range(
             end_date = f"{end_date}T23:59:59"
         
         
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         events = store.get_events(
             calendar_name=calendar_name,
             start_date=start_date,
@@ -172,7 +251,7 @@ def get_event(calendar_name: str, event_id: str) -> str:
     """
     try:
         # Get all events and filter by ID
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         events = store.get_events(calendar_name=calendar_name)
         event = next((e for e in events if e["id"] == event_id), None)
         
@@ -197,7 +276,7 @@ def list_all_calendars() -> str:
         JSON string containing calendar names
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         calendars = store.get_all_calendars()
         return json.dumps({
             "calendars": calendars,
@@ -292,7 +371,7 @@ def search_events(
         # If start_date, end_date, and duration are all None, this results in:
         # start_dt = now, end_dt = start_dt + 3 days.
 
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         events = store.get_events(
             calendar_name=calendar_name,
             start_date=start_iso_for_store,
@@ -347,7 +426,7 @@ def create_calendar_event(
         JSON string containing the result
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         event_id = store.create_event(
             calendar_name=calendar_name,
             summary=summary,
@@ -399,7 +478,7 @@ def update_calendar_event(
         JSON string containing the result
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         success = store.update_event(
             event_id=event_id,
             calendar_name=calendar_name,
@@ -438,7 +517,7 @@ def delete_calendar_event(event_id: str, calendar_name: str) -> str:
         JSON string containing the result
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         success = store.delete_event(
             event_id=event_id,
             calendar_name=calendar_name
@@ -504,7 +583,7 @@ def create_event_prompt(
     
     # Create the event
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         event_id = store.create_event(
             calendar_name=calendar_name,
             summary=summary,
@@ -545,7 +624,7 @@ def search_events_prompt(
         if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
             end_date = f"{end_date}T23:59:59"
             
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         events = store.get_events(
             calendar_name=calendar_name,
             start_date=start_date,
@@ -592,7 +671,7 @@ def api_list_calendars() -> str:
         JSON response with calendars
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         calendars = store.get_all_calendars()
         
         response = ApiResponse.success(
@@ -626,7 +705,7 @@ def api_get_events(calendar_name: str) -> str:
         start_iso = format_iso(start_dt)
         end_iso = format_iso(end_dt)
         
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         raw_events = store.get_events(
             calendar_name=calendar_name,
             start_date=start_iso,
@@ -687,7 +766,7 @@ def api_get_events_with_dates(calendar_name: str, start_date: str, end_date: str
         start_iso = format_iso(start_dt)
         end_iso = format_iso(end_dt)
         
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         raw_events = store.get_events(
             calendar_name=calendar_name,
             start_date=start_iso,
@@ -743,7 +822,7 @@ def api_create_event_path(calendar_name: str, summary: str, start_date: str, end
             all_day=False
         )
         
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         event_id = store.create_event(
             calendar_name=event_data.calendar_name,
             summary=event_data.summary,
@@ -788,7 +867,7 @@ def api_update_event_path(event_id: str, calendar_name: str) -> str:
             calendar_name=calendar_name
         )
         
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         
         success = store.update_event(
             event_id=event_data.event_id,
@@ -830,7 +909,7 @@ def api_delete_event_path(event_id: str, calendar_name: str) -> str:
         JSON response with result
     """
     try:
-        store = CalendarStore(quiet=True)
+        store = get_calendar_store()
         success = store.delete_event(event_id=event_id, calendar_name=calendar_name)
         
         if success:

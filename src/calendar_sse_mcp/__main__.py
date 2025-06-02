@@ -18,7 +18,7 @@ import re
 
 from . import calendar_store, __version__
 from .calendar_store import CalendarStoreError
-from .server import mcp
+from .server import mcp, get_calendar_store
 from .launch_agent import create_launch_agent, check_launch_agent, uninstall_launch_agent
 from .date_utils import create_date_range, format_iso
 
@@ -274,8 +274,8 @@ def list_calendars_command(args: argparse.Namespace) -> None:
         # Get server port - use dev port if specified
         port = 27213 if hasattr(args, 'dev') and args.dev else 27212
         
-        # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json, port=port)
+        # Use the global calendar store instance instead of creating a new one
+        store = get_calendar_store()
         calendars = store.get_all_calendars()
         
         if args.json:
@@ -311,7 +311,7 @@ def get_events_command(args: argparse.Namespace) -> None:
             end_date = f"{end_date}T23:59:59"
             
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json, port=port)
+        store = get_calendar_store()
         events = store.get_events(
             calendar_name=args.calendar,
             start_date=start_date,
@@ -408,7 +408,7 @@ def create_event_command_v2(args: argparse.Namespace) -> None:
         end_date = f"{date_only}T{end_time}:00"
         
         # Create the event
-        store = calendar_store.CalendarStore(quiet=args.json, port=port)
+        store = get_calendar_store()
         event_id = store.create_event(
             calendar_name=calendar,
             summary=args.summary,
@@ -455,7 +455,7 @@ def update_event_command(args: argparse.Namespace) -> None:
             end_date = f"{args.date}T{args.end_time}:00"
         
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json, port=port)
+        store = get_calendar_store()
         success = store.update_event(
             event_id=args.event_id,
             calendar_name=args.calendar,
@@ -491,7 +491,7 @@ def delete_event_command(args: argparse.Namespace) -> None:
         port = 27213 if hasattr(args, 'dev') and args.dev else 27212
         
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json, port=port)
+        store = get_calendar_store()
         success = store.delete_event(
             event_id=args.event_id,
             calendar_name=args.calendar
@@ -538,7 +538,7 @@ def search_events_command(args: argparse.Namespace) -> None:
             end_date = f"{end_date}T23:59:59"
         
         # Create a CalendarStore instance
-        store = calendar_store.CalendarStore(quiet=args.json, port=port)
+        store = get_calendar_store()
         events = store.get_events(
             calendar_name=calendar_name,
             start_date=start_date,

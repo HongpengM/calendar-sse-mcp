@@ -310,9 +310,49 @@ def search_events(
                   e.g., "3d", "1 week", "1 month".
                   Default is "3d" if only start_date is given or if neither start_date nor end_date is given.
                   See date parsing logic for details on how start_date, end_date, and duration interact.
+    
+    Examples:
+        # Basic search - searches next 3 days (default duration)
+        search_events("meeting")
+        
+        # Search in specific calendar
+        search_events("dentist", calendar_name="Personal")
+        
+        # Search with custom duration from today
+        search_events("workout", duration="1 week")
+        search_events("birthday", duration="1 month")
+        search_events("deadline", duration="7d")
+        
+        # Search from specific start date (uses default 3-day duration)
+        search_events("conference", start_date="2024-01-15")
+        
+        # Search from start date with custom duration
+        search_events("vacation", start_date="2024-06-01", duration="2 weeks")
+        
+        # Search within specific date range
+        search_events("project", start_date="2024-01-01", end_date="2024-01-31")
+        search_events("appointment", start_date="next Monday", end_date="next Friday")
+        
+        # Search backwards from end date (duration before end_date)
+        search_events("review", end_date="2024-12-31", duration="1 month")
+        
+        # Get all events in date range (empty query matches all)
+        search_events("", start_date="today", end_date="tomorrow")
+        
+        # Flexible date formats supported by dateparser
+        search_events("lunch", start_date="tomorrow", end_date="next week")
+        search_events("call", start_date="Jan 15 2024", end_date="Jan 20 2024")
+        search_events("event", start_date="2024-01-15 09:00", end_date="2024-01-15 17:00")
+        
+    Date Logic:
+        - No dates: today + 3 days (default)
+        - Only start_date: start_date + duration (default 3d)
+        - Only end_date: end_date - duration (default 3d) to end_date
+        - Both dates: exact range (if same date, end extends to 23:59:59)
+        - Duration formats: "3d", "1 week", "2 months", "7 days"
         
     Returns:
-        JSON string containing matching events
+        JSON string containing matching events with count
     """
     try:
         # Date parsing and duration logic from get_events_date_range
@@ -332,32 +372,40 @@ def search_events(
         start_dt: Optional[datetime] = None
         end_dt: Optional[datetime] = None
 
-        if end_date and not start_date:
+        if end_date and not start_date: # Only end_date provided
             parsed_end_dt = dateparser.parse(end_date)
             if not parsed_end_dt:
                 raise ValueError(f"Could not parse end date: {end_date}")
             end_dt = parsed_end_dt
             start_dt = end_dt - timedelta(days=days)
         else:
-            if not start_date:
+            if not start_date: # No start_date and no end date
                 # Default to today if start_date is not provided
                 start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            else:
+            else: 
                 parsed_start_dt = dateparser.parse(start_date)
                 if not parsed_start_dt:
                     raise ValueError(f"Could not parse start date: {start_date}")
                 start_dt = parsed_start_dt
-            
-            if end_date:
-                parsed_end_dt = dateparser.parse(end_date)
-                if not parsed_end_dt:
-                    raise ValueError(f"Could not parse end date: {end_date}")
-                end_dt = parsed_end_dt
-                if start_dt == end_dt:
-                    end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999)
-            else:
-                # Use duration if no end_date is provided
-                end_dt = start_dt + timedelta(days=days)
+    
+                if end_date: # If start_date and end_date provided
+                    parsed_end_dt = dateparser.parse(end_date)
+                    if not parsed_end_dt:
+                        raise ValueError(f"Could not parse end date: {end_date}")
+                    end_dt = parsed_end_dt
+                    
+                    # Handle same-day searches: if dates are the same and appear to be date-only inputs,
+                    # set start to beginning of day and end to end of day
+                    if start_dt.date() == end_dt.date():
+                        # Check if inputs were likely date-only (both parsed to midnight)
+                        if (start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0 and
+                            end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0):
+                            # Set start to beginning of day and end to end of day
+                            start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                            end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999)
+                else: # If only start date provided
+                    # Use duration if no end_date is provided
+                    end_dt = start_dt + timedelta(days=days)
         
         if start_dt and end_dt and end_dt < start_dt:
             raise ValueError("End date cannot be before start date")

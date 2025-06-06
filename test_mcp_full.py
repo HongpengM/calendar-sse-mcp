@@ -165,6 +165,36 @@ def main():
             "calendar_name": calendar_name,
             "duration": "7d" # Will be today + 7 days
         }, base_url)
+        time.sleep(3) # Wait for response
+
+        # Step 10: Test same-day search with empty query (should return all events on specific day)
+        print("\nStep 10: Testing same-day search - all events on 2025-06-08")
+        send_request(session_id, "search_events", {
+            "query": "",
+            "start_date": "2025-06-08",
+            "end_date": "2025-06-08"
+        }, base_url)
+        time.sleep(3) # Wait for response
+
+        # Create a test event for 2025-06-08 to ensure we have something to find
+        print("\nStep 10a: Creating test event for 2025-06-08 to verify same-day search")
+        send_request(session_id, "create_calendar_event", {
+            "calendar_name": calendar_name,
+            "summary": "Test event for same-day search",
+            "start_date": "2025-06-08T10:00:00",
+            "end_date": "2025-06-08T11:00:00",
+            "location": "Test Location",
+            "description": "Event created to test same-day search functionality"
+        }, base_url)
+        time.sleep(2) # Wait for creation
+
+        # Now test the same-day search again to see the created event
+        print("\nStep 10b: Re-testing same-day search after creating test event")
+        send_request(session_id, "search_events", {
+            "query": "",
+            "start_date": "2025-06-08",
+            "end_date": "2025-06-08"
+        }, base_url)
         
         # Wait for final responses
         print("\nWaiting for final responses from new search tests...")

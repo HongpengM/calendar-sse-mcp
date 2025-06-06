@@ -28,7 +28,7 @@ wheels = [
 
 [[package]]
 name = "calendar-sse-mcp"
-version = "0.1.17"
+version = "0.1.19"
 source = { editable = "." }
 dependencies = [
     { name = "dateparser" },

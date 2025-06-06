@@ -516,45 +516,28 @@ def delete_event_command(args: argparse.Namespace) -> None:
 
 
 def search_events_command(args: argparse.Namespace) -> None:
-    """Search for events"""
+    """Search for events using the enhanced server logic"""
     try:
-        # Get server port - use dev port if specified
-        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
+        # Import the enhanced search_events function from server
+        from .server import search_events
         
-        # Get calendar from args, but don't default to DEFAULT_CALENDAR
-        # This allows searching across all calendars when not specified
-        calendar_name = args.calendar
-        
-        # Handle date ranges by adjusting time components
-        start_date = args.start_date
-        end_date = args.end_date
-        
-        # If start_date is provided and doesn't have time component, add beginning of day
-        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
-            start_date = f"{start_date}T00:00:00"
-            
-        # If end_date is provided and doesn't have time component, add end of day
-        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
-            end_date = f"{end_date}T23:59:59"
-        
-        # Create a CalendarStore instance
-        store = get_calendar_store()
-        events = store.get_events(
-            calendar_name=calendar_name,
-            start_date=start_date,
-            end_date=end_date
+        # Use the enhanced search_events function with the same logic as the server
+        result = search_events(
+            query=args.query,
+            calendar_name=args.calendar,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            duration=args.duration
         )
         
-        # Filter events by query
-        query = args.query.lower()
-        matching_events = [
-            event for event in events
-            if (
-                query in event["summary"].lower() or
-                query in (event["description"] or "").lower() or
-                query in (event["location"] or "").lower()
-            )
-        ]
+        # Parse the JSON result from the search_events function
+        parsed_result = json.loads(result)
+        
+        if "error" in parsed_result:
+            print(f"Error: {parsed_result['error']}", file=sys.stderr)
+            sys.exit(1)
+        
+        matching_events = parsed_result.get("events", [])
         
         if args.json:
             print(json.dumps(matching_events, indent=2, ensure_ascii=False))

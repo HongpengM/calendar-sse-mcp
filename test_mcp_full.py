@@ -167,8 +167,11 @@ def main():
         }, base_url)
         time.sleep(3) # Wait for response
 
-        # Step 10: Test same-day search with empty query (should return all events on specific day)
+        # Step 10: Test same-day search with empty query 
+        # This verifies the core logic: when start_date == end_date and both are date-only,
+        # the search should span from 00:00:00 to 23:59:59 of that day
         print("\nStep 10: Testing same-day search - all events on 2025-06-08")
+        print("Expected behavior: start_date='2025-06-08' + end_date='2025-06-08' should search 00:00:00 to 23:59:59")
         send_request(session_id, "search_events", {
             "query": "",
             "start_date": "2025-06-08",

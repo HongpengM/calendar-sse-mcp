@@ -98,12 +98,13 @@ def create_date_range(
 
 def format_iso(dt: datetime) -> str:
     """
-    Format a datetime as ISO 8601 string
+    Format a datetime as ISO 8601 string without microseconds for calendar compatibility
     
     Args:
         dt: datetime object
         
     Returns:
-        ISO 8601 formatted string
+        ISO 8601 formatted string without microseconds
     """
-    return dt.isoformat() 
+    # Remove microseconds to avoid compatibility issues with calendar store
+    return dt.replace(microsecond=0).isoformat() 

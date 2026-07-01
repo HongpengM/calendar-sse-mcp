@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Calendar MCP Server - An MCP server for interacting with macOS Calendar.app
+calendar-mcp server - An MCP server for interacting with macOS Calendar.app
 
 This server provides an interface to Calendar.app on macOS, allowing you to:
 - List available calendars
@@ -22,15 +22,20 @@ import sys
 from mcp.server.fastmcp import FastMCP
 
 from .calendar_store import CalendarStore, CalendarStoreError
-from .models import ApiResponse, CalendarEvent, EventCreate, EventUpdate, EventList, CalendarList
-from .date_utils import create_date_range, format_iso
+from .models import (
+    ApiResponse, CalendarEvent, EventCreate, EventUpdate, EventList, CalendarList,
+    Reminder, ReminderList, ReminderListResponse, ReminderSearchResponse,
+    ReminderCreate, ReminderUpdate
+)
+from .date_utils import create_date_range, format_iso, parse_date_string
 
 
 # Create the MCP server - settings can be passed to the constructor
+# Use 0.0.0.0 to accept connections from both 127.0.0.1 and localhost
 mcp = FastMCP(
     "Calendar MCP",
     port=int(os.environ.get("SERVER_PORT", "27212")),
-    host=os.environ.get("SERVER_HOST", "127.0.0.1")
+    host=os.environ.get("SERVER_HOST", "0.0.0.0")
 )
 
 # Initialize a global calendar store instance to avoid authorization conflicts
@@ -109,16 +114,17 @@ def get_calendar_store() -> CalendarStore:
 # Main entry point ---------------------------------------------------------
 
 if __name__ == "__main__":
-    # Get the port from environment variables
-    port = int(os.environ.get("SERVER_PORT", "27212"))
-    transport = os.environ.get("SERVER_TRANSPORT", "sse")
+    transport = os.environ.get("SERVER_TRANSPORT", "streamable-http")
     
-    print(f"Server configured with port={port}, transport={transport}")
-    
-    # Initialize the calendar store early to handle authorization
-    print("Initializing calendar access...")
-    get_calendar_store()
-    print("Calendar access initialized.")
+    if transport == "stdio":
+        print("Starting Calendar MCP server with STDIO transport...", file=sys.stderr)
+    else:
+        port = int(os.environ.get("SERVER_PORT", "27212"))
+        host = os.environ.get("SERVER_HOST", "0.0.0.0")
+        print(f"Starting Calendar MCP server on {host}:{port} with {transport} transport...", file=sys.stderr)
+        print("Initializing calendar access...", file=sys.stderr)
+        get_calendar_store()
+        print("Calendar access initialized.", file=sys.stderr)
     
     # Run the server with the specified transport
     mcp.run(transport=transport)
@@ -310,9 +316,49 @@ def search_events(
                   e.g., "3d", "1 week", "1 month".
                   Default is "3d" if only start_date is given or if neither start_date nor end_date is given.
                   See date parsing logic for details on how start_date, end_date, and duration interact.
+    
+    Examples:
+        # Basic search - searches next 3 days (default duration)
+        search_events("meeting")
+        
+        # Search in specific calendar
+        search_events("dentist", calendar_name="Personal")
+        
+        # Search with custom duration from today
+        search_events("workout", duration="1 week")
+        search_events("birthday", duration="1 month")
+        search_events("deadline", duration="7d")
+        
+        # Search from specific start date (uses default 3-day duration)
+        search_events("conference", start_date="2024-01-15")
+        
+        # Search from start date with custom duration
+        search_events("vacation", start_date="2024-06-01", duration="2 weeks")
+        
+        # Search within specific date range
+        search_events("project", start_date="2024-01-01", end_date="2024-01-31")
+        search_events("appointment", start_date="next Monday", end_date="next Friday")
+        
+        # Search backwards from end date (duration before end_date)
+        search_events("review", end_date="2024-12-31", duration="1 month")
+        
+        # Get all events in date range (empty query matches all)
+        search_events("", start_date="today", end_date="tomorrow")
+        
+        # Flexible date formats supported by dateparser
+        search_events("lunch", start_date="tomorrow", end_date="next week")
+        search_events("call", start_date="Jan 15 2024", end_date="Jan 20 2024")
+        search_events("event", start_date="2024-01-15 09:00", end_date="2024-01-15 17:00")
+        
+    Date Logic:
+        - No dates: today + 3 days (default)
+        - Only start_date: start_date + duration (default 3d)
+        - Only end_date: end_date - duration (default 3d) to end_date
+        - Both dates: exact range (if same date, end extends to 23:59:59)
+        - Duration formats: "3d", "1 week", "2 months", "7 days"
         
     Returns:
-        JSON string containing matching events
+        JSON string containing matching events with count
     """
     try:
         # Date parsing and duration logic from get_events_date_range
@@ -332,32 +378,40 @@ def search_events(
         start_dt: Optional[datetime] = None
         end_dt: Optional[datetime] = None
 
-        if end_date and not start_date:
+        if end_date and not start_date: # Only end_date provided
             parsed_end_dt = dateparser.parse(end_date)
             if not parsed_end_dt:
                 raise ValueError(f"Could not parse end date: {end_date}")
             end_dt = parsed_end_dt
             start_dt = end_dt - timedelta(days=days)
         else:
-            if not start_date:
+            if not start_date: # No start_date and no end date
                 # Default to today if start_date is not provided
                 start_dt = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            else:
+            else: 
                 parsed_start_dt = dateparser.parse(start_date)
                 if not parsed_start_dt:
                     raise ValueError(f"Could not parse start date: {start_date}")
                 start_dt = parsed_start_dt
-            
-            if end_date:
-                parsed_end_dt = dateparser.parse(end_date)
-                if not parsed_end_dt:
-                    raise ValueError(f"Could not parse end date: {end_date}")
-                end_dt = parsed_end_dt
-                if start_dt == end_dt:
-                    end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999)
-            else:
-                # Use duration if no end_date is provided
-                end_dt = start_dt + timedelta(days=days)
+    
+                if end_date: # If start_date and end_date provided
+                    parsed_end_dt = dateparser.parse(end_date)
+                    if not parsed_end_dt:
+                        raise ValueError(f"Could not parse end date: {end_date}")
+                    end_dt = parsed_end_dt
+                    
+                    # Handle same-day searches: if dates are the same and appear to be date-only inputs,
+                    # set start to beginning of day and end to end of day
+                    if start_dt.date() == end_dt.date():
+                        # Check if inputs were likely date-only (both parsed to midnight)
+                        if (start_dt.hour == 0 and start_dt.minute == 0 and start_dt.second == 0 and
+                            end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0):
+                            # Set start to beginning of day and end to end of day
+                            start_dt = start_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+                            end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999)
+                else: # If only start date provided
+                    # Use duration if no end_date is provided
+                    end_dt = start_dt + timedelta(days=days)
         
         if start_dt and end_dt and end_dt < start_dt:
             raise ValueError("End date cannot be before start date")
@@ -536,6 +590,262 @@ def delete_calendar_event(event_id: str, calendar_name: str) -> str:
             "success": False,
             "error": f"Unexpected error: {str(e)}"
         }, ensure_ascii=False)
+
+
+@mcp.tool()
+def list_all_reminder_lists() -> str:
+    """
+    List all available macOS Reminder lists with qualified names.
+
+    Returns:
+        JSON string containing reminder lists and count
+    """
+    try:
+        store = get_calendar_store()
+        raw_lists = store.get_all_reminder_lists()
+        lists = [ReminderList(**raw) for raw in raw_lists]
+        response = ReminderListResponse(reminder_lists=lists, count=len(lists))
+        return json.dumps(response.model_dump(mode="json"), ensure_ascii=False)
+    except CalendarStoreError as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"Unexpected error: {str(e)}"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def search_reminders(
+    query: str = "",
+    calendar_name: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    include_completed: bool = True,
+    include_no_due: bool = True
+) -> str:
+    """
+    Search for reminders in macOS Reminders.app.
+
+    Args:
+        query: Case-insensitive search term. Empty returns all matching reminders.
+        calendar_name: Optional reminder list name or qualified name (e.g. reminders:iCloud/Tasks).
+        start_date: Optional start of due date range, parseable by dateparser.
+        end_date: Optional end of due date range, parseable by dateparser.
+        include_completed: Whether to include completed reminders (default True).
+        include_no_due: Whether to include reminders without a due date (default True).
+
+    Date logic:
+        - No dates: due date range defaults to -3 days to +7 days.
+        - Reminders with no due date are always included when include_no_due=True.
+
+    Returns:
+        JSON string containing matching reminders with count
+    """
+    try:
+        start_dt = None
+        end_dt = None
+        if start_date:
+            start_dt = parse_date_string(start_date)
+        if end_date:
+            end_dt = parse_date_string(end_date)
+
+        store = get_calendar_store()
+        raw_reminders = store.get_reminders(
+            calendar_name=calendar_name,
+            start_date=start_dt,
+            end_date=end_dt,
+            include_completed=include_completed,
+            include_no_due=include_no_due,
+        )
+
+        query_lower = query.lower()
+        matching = [
+            raw for raw in raw_reminders
+            if (
+                query_lower in raw["title"].lower() or
+                query_lower in (raw.get("notes") or "").lower()
+            )
+        ]
+
+        reminders = [Reminder(**raw) for raw in matching]
+        response = ReminderSearchResponse(reminders=reminders, count=len(reminders))
+        return json.dumps(response.model_dump(mode="json"), ensure_ascii=False)
+    except ValueError as e:
+        return json.dumps({"error": f"Date error: {str(e)}"}, ensure_ascii=False)
+    except CalendarStoreError as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": f"Unexpected error: {str(e)}"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def create_reminder(
+    calendar_name: str,
+    title: str,
+    due_date: Optional[str] = None,
+    notes: Optional[str] = None,
+    priority: Optional[int] = None
+) -> str:
+    """
+    Create a new reminder in an existing macOS Reminder list.
+
+    Args:
+        calendar_name: Existing reminder list name or qualified name (e.g. reminders:iCloud/Tasks).
+        title: Reminder title.
+        due_date: Optional due date in any format parseable by dateparser.
+        notes: Optional notes.
+        priority: Optional priority (0=None, 1=High, 5=Low, 9=Medium).
+
+    Returns:
+        JSON string containing the new reminder ID
+    """
+    try:
+        validated = ReminderCreate(
+            calendar_name=calendar_name,
+            title=title,
+            due_date=due_date,
+            notes=notes,
+            priority=priority
+        )
+        store = get_calendar_store()
+        reminder_id = store.create_reminder(
+            calendar_name=validated.calendar_name,
+            title=validated.title,
+            due_date=format_iso(validated.due_date) if validated.due_date else None,
+            notes=validated.notes,
+            priority=validated.priority
+        )
+        return json.dumps({
+            "success": True,
+            "reminder_id": reminder_id
+        }, ensure_ascii=False)
+    except ValueError as e:
+        return json.dumps({"success": False, "error": f"Validation error: {str(e)}"}, ensure_ascii=False)
+    except CalendarStoreError as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Unexpected error: {str(e)}"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def update_reminder(
+    reminder_id: str,
+    calendar_name: str,
+    title: Optional[str] = None,
+    due_date: Optional[str] = None,
+    notes: Optional[str] = None,
+    priority: Optional[int] = None,
+    completed: Optional[bool] = None
+) -> str:
+    """
+    Update an existing macOS reminder.
+
+    Args:
+        reminder_id: ID of the reminder to update.
+        calendar_name: Name or qualified name of the list containing the reminder.
+        title: Optional new title.
+        due_date: Optional new due date.
+        notes: Optional new notes.
+        priority: Optional new priority.
+        completed: Optional completed state.
+
+    Returns:
+        JSON string containing the result
+    """
+    try:
+        validated = ReminderUpdate(
+            reminder_id=reminder_id,
+            calendar_name=calendar_name,
+            title=title,
+            due_date=due_date,
+            notes=notes,
+            priority=priority,
+            completed=completed
+        )
+        store = get_calendar_store()
+        success = store.update_reminder(
+            reminder_id=validated.reminder_id,
+            calendar_name=validated.calendar_name,
+            title=validated.title,
+            due_date=format_iso(validated.due_date) if validated.due_date else None,
+            notes=validated.notes,
+            priority=validated.priority,
+            completed=validated.completed
+        )
+        return json.dumps({"success": success}, ensure_ascii=False)
+    except ValueError as e:
+        return json.dumps({"success": False, "error": f"Validation error: {str(e)}"}, ensure_ascii=False)
+    except CalendarStoreError as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Unexpected error: {str(e)}"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def complete_reminder(reminder_id: str, calendar_name: str) -> str:
+    """
+    Mark an existing macOS reminder as completed.
+
+    Args:
+        reminder_id: ID of the reminder to complete.
+        calendar_name: Name or qualified name of the list containing the reminder.
+
+    Returns:
+        JSON string containing the result
+    """
+    try:
+        store = get_calendar_store()
+        success = store.complete_reminder(reminder_id=reminder_id, calendar_name=calendar_name)
+        return json.dumps({"success": success}, ensure_ascii=False)
+    except CalendarStoreError as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Unexpected error: {str(e)}"}, ensure_ascii=False)
+
+
+@mcp.tool()
+def delete_reminder(reminder_id: str, calendar_name: str) -> str:
+    """
+    Delete an existing macOS reminder.
+
+    Args:
+        reminder_id: ID of the reminder to delete.
+        calendar_name: Name or qualified name of the list containing the reminder.
+
+    Returns:
+        JSON string containing the result
+    """
+    try:
+        store = get_calendar_store()
+        success = store.delete_reminder(reminder_id=reminder_id, calendar_name=calendar_name)
+        return json.dumps({"success": success}, ensure_ascii=False)
+    except CalendarStoreError as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Unexpected error: {str(e)}"}, ensure_ascii=False)
+
+
+@mcp.resource("reminder-lists://list")
+def list_reminder_lists_resource() -> str:
+    """
+    MCP resource to list all reminder lists.
+
+    Returns:
+        JSON string containing reminder lists
+    """
+    return list_all_reminder_lists()
+
+
+@mcp.resource("reminders://{calendar_name}")
+def get_reminders_in_list(calendar_name: str) -> str:
+    """
+    MCP resource to get reminders from a specific reminder list.
+
+    Args:
+        calendar_name: Reminder list title or qualified name (e.g. reminders:iCloud/Tasks)
+
+    Returns:
+        JSON string containing reminders
+    """
+    return search_reminders(calendar_name=calendar_name)
 
 
 @mcp.prompt()

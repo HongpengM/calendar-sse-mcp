@@ -1,5 +1,5 @@
 """
-Utilities for dynamically managing macOS Launch Agents for the Calendar MCP server
+Utilities for dynamically managing macOS Launch Agents for the calendar-mcp server
 """
 import os
 import subprocess
@@ -84,13 +84,13 @@ def get_agent_name(name: Optional[str] = None) -> str:
     Returns:
         Launch agent name
     """
-    return name or os.environ.get("LAUNCH_AGENT_NAME", "com.calendar-sse-mcp")
+    return name or os.environ.get("LAUNCH_AGENT_NAME", "com.calendar-mcp")
 
 
 def generate_launch_agent_plist(
     agent_name: str,
     port: int = 27212,
-    host: str = "127.0.0.1",
+    host: str = "0.0.0.0",  # Accept connections from both 127.0.0.1 and localhost
     log_dir: str = "/tmp",
     python_exec: Optional[str] = None,
     working_dir: Optional[str] = None,
@@ -131,7 +131,7 @@ def generate_launch_agent_plist(
     program_args = [
         f'<string>{python_exec}</string>',
         '<string>-m</string>',
-        '<string>calendar_sse_mcp</string>',
+        '<string>calendar_http_mcp</string>',
         '<string>server</string>',
         '<string>run</string>'
     ]
@@ -140,19 +140,18 @@ def generate_launch_agent_plist(
     if is_dev_server:
         program_args.append('<string>--dev</string>')
     else:
-        # Otherwise use the explicit port and host arguments
+        # Use explicit port argument, but rely on SERVER_HOST env var for host
         program_args.extend([
             '<string>--port</string>',
-            f'<string>{port}</string>',
-            '<string>--host</string>',
-            f'<string>{host}</string>'
+            f'<string>{port}</string>'
         ])
     
     # Environment variables
     env_vars_dict = {
         "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
         "SERVER_PORT": str(port),
-        "SERVER_HOST": host
+        "SERVER_HOST": host,
+        "SERVER_TRANSPORT": "streamable-http"  # Use Streamable HTTP transport instead of SSE
     }
     
     # Add additional environment variables

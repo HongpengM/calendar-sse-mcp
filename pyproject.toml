@@ -1,6 +1,6 @@
 [project]
-name = "calendar-sse-mcp"
-version = "0.1.18"
+name = "calendar-http-mcp"
+version = "0.1.20"
 description = "A Model Context Protocol server for macOS Calendar.app"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,7 +18,9 @@ dependencies = [
 ]
 
 [project.scripts]
-calendar-sse = "calendar_sse_mcp.__main__:cli_main"
+calendar-mcp = "calendar_http_mcp.__main__:cli_main"
+calendar-stdio = "calendar_http_mcp.__main__:run_stdio"
+calendar-cli = "calendar_http_mcp.__main__:cli_entry"
 
 [build-system]
 requires = ["setuptools>=61.0"]

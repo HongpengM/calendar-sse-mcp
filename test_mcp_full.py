@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Improved test script for the Calendar MCP Server that listens for SSE responses
+Improved test script for the Calendar MCP Server that listens for http responses
 """
 import json
 import requests
@@ -22,7 +22,7 @@ def get_base_url(port):
     return f"http://localhost:{port}"
 
 def listen_for_sse_events(listener_session_id, base_url):
-    """Listen for SSE events continuously and print responses"""
+    """Listen for http events continuously and print responses"""
     print(f"Starting SSE listener for session {listener_session_id}...")
     
     sse_url = f"{base_url}/sse"
@@ -31,7 +31,7 @@ def listen_for_sse_events(listener_session_id, base_url):
     })
     
     if response.status_code != 200:
-        print(f"Error connecting to SSE endpoint: {response.status_code}")
+        print(f"Error connecting to http endpoint: {response.status_code}")
         return
     
     client = sseclient.SSEClient(response)
@@ -42,7 +42,7 @@ def listen_for_sse_events(listener_session_id, base_url):
         elif event.event == "message":
             try:
                 data = json.loads(event.data)
-                print("\n=== Received SSE Message ===")
+                print("\n=== Received http Message ===")
                 pprint(data)
                 print("===========================\n")
             except json.JSONDecodeError:
@@ -71,7 +71,7 @@ def main():
         print(f"Error connecting to SSE endpoint: {response.status_code}")
         return
     
-    # Create SSE client
+    # Create http client
     client = sseclient.SSEClient(response)
     
     # Step 2: Get the messages endpoint from the first event
@@ -92,7 +92,7 @@ def main():
         print("Failed to extract session ID from endpoint URL")
         return
     
-    # Start a background thread to listen for SSE events on a new connection
+    # Start a background thread to listen for http events on a new connection
     sse_thread = threading.Thread(target=listen_for_sse_events, args=(session_id, base_url))
     sse_thread.daemon = True
     sse_thread.start()
@@ -164,6 +164,39 @@ def main():
             "query": "", # Empty query to get all events in range
             "calendar_name": calendar_name,
             "duration": "7d" # Will be today + 7 days
+        }, base_url)
+        time.sleep(3) # Wait for response
+
+        # Step 10: Test same-day search with empty query 
+        # This verifies the core logic: when start_date == end_date and both are date-only,
+        # the search should span from 00:00:00 to 23:59:59 of that day
+        print("\nStep 10: Testing same-day search - all events on 2025-06-08")
+        print("Expected behavior: start_date='2025-06-08' + end_date='2025-06-08' should search 00:00:00 to 23:59:59")
+        send_request(session_id, "search_events", {
+            "query": "",
+            "start_date": "2025-06-08",
+            "end_date": "2025-06-08"
+        }, base_url)
+        time.sleep(3) # Wait for response
+
+        # Create a test event for 2025-06-08 to ensure we have something to find
+        print("\nStep 10a: Creating test event for 2025-06-08 to verify same-day search")
+        send_request(session_id, "create_calendar_event", {
+            "calendar_name": calendar_name,
+            "summary": "Test event for same-day search",
+            "start_date": "2025-06-08T10:00:00",
+            "end_date": "2025-06-08T11:00:00",
+            "location": "Test Location",
+            "description": "Event created to test same-day search functionality"
+        }, base_url)
+        time.sleep(2) # Wait for creation
+
+        # Now test the same-day search again to see the created event
+        print("\nStep 10b: Re-testing same-day search after creating test event")
+        send_request(session_id, "search_events", {
+            "query": "",
+            "start_date": "2025-06-08",
+            "end_date": "2025-06-08"
         }, base_url)
         
         # Wait for final responses

@@ -1,6 +1,6 @@
-# Calendar SSE MCP Command-line Tools
+# calendar-http-mcp Command-line Tools
 
-This document describes the comprehensive command-line interface included with the Calendar SSE MCP package.
+This document describes the comprehensive command-line interface included with the calendar-http-mcp package.
 
 ## Usage
 
@@ -8,18 +8,18 @@ Once installed, you can access the CLI through either:
 
 ```bash
 # Via uvx (recommended for tools from packages)
-uvx --from calendar-sse-mcp calendar-sse [command] [options]
+uvx --from calendar-http-mcp calendar-mcp [command] [options]
 
 # Directly (if installed in your environment)
-calendar-sse [command] [options]
+calendar-mcp [command] [options]
 
 # Or through the Python module
-python -m calendar_sse_mcp [command] [options]
+python -m calendar_http_mcp [command] [options]
 ```
 
 ## Command Structure
 
-The `calendar-sse` command provides two main subcommands:
+The `calendar-mcp` command provides two main subcommands:
 
 - `cli`: For direct calendar operations (creating events, searching, etc.)
 - `server`: For server management operations (install, start, stop, etc.)
@@ -29,7 +29,7 @@ The `calendar-sse` command provides two main subcommands:
 The `cli` subcommand provides direct access to Calendar.app functionality:
 
 ```bash
-calendar-sse cli [operation] [options]
+calendar-mcp cli [operation] [options]
 ```
 
 **Global Options:**
@@ -46,12 +46,23 @@ calendar-sse cli [operation] [options]
 | `delete`     | Delete an event                     |
 | `search`     | Search for events                   |
 
+### Available Reminder Operations
+
+| Operation           | Description                         |
+|---------------------|-------------------------------------|
+| `reminder-lists`    | List all available reminder lists   |
+| `reminders`         | Get reminders from a reminder list  |
+| `create-reminder`   | Create a new reminder               |
+| `update-reminder`   | Update an existing reminder         |
+| `complete-reminder` | Mark a reminder as completed        |
+| `delete-reminder`   | Delete a reminder                   |
+
 ### `cli calendars` - List Calendars
 
 List all available calendars in Calendar.app:
 
 ```bash
-calendar-sse cli calendars [options]
+calendar-mcp cli calendars [options]
 ```
 
 **Options:**
@@ -62,7 +73,7 @@ calendar-sse cli calendars [options]
 Get events from a specific calendar:
 
 ```bash
-calendar-sse cli events CALENDAR [options]
+calendar-mcp cli events CALENDAR [options]
 ```
 
 **Arguments:**
@@ -78,7 +89,7 @@ calendar-sse cli events CALENDAR [options]
 Create a new event in a calendar:
 
 ```bash
-calendar-sse cli create [options]
+calendar-mcp cli create [options]
 ```
 
 **Options:**
@@ -97,7 +108,7 @@ calendar-sse cli create [options]
 Update an existing event:
 
 ```bash
-calendar-sse cli update CALENDAR EVENT_ID [options]
+calendar-mcp cli update CALENDAR EVENT_ID [options]
 ```
 
 **Arguments:**
@@ -118,7 +129,7 @@ calendar-sse cli update CALENDAR EVENT_ID [options]
 Delete an event:
 
 ```bash
-calendar-sse cli delete CALENDAR EVENT_ID [options]
+calendar-mcp cli delete CALENDAR EVENT_ID [options]
 ```
 
 **Arguments:**
@@ -133,7 +144,7 @@ calendar-sse cli delete CALENDAR EVENT_ID [options]
 Search for events:
 
 ```bash
-calendar-sse cli search QUERY [options]
+calendar-mcp cli search QUERY [options]
 ```
 
 **Arguments:**
@@ -151,7 +162,7 @@ calendar-sse cli search QUERY [options]
 The `server` subcommand manages the server as a background service:
 
 ```bash
-calendar-sse server [operation] [options]
+calendar-mcp server [operation] [options]
 ```
 
 ### Available Server Operations
@@ -171,13 +182,13 @@ calendar-sse server [operation] [options]
 Install the server as a LaunchAgent:
 
 ```bash
-calendar-sse server install [options]
+calendar-mcp server install [options]
 ```
 
 **Options:**
 - `--port PORT` - Server port (default: 27212)
 - `--logdir DIR` - Log directory (default: /tmp)
-- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--name NAME` - LaunchAgent name (default: com.calendar-mcp)
 - `--no-load` - Don't start the server after installation
 - `--dev` - Install as a development server on port 27213 (overrides --port)
 
@@ -186,55 +197,55 @@ calendar-sse server install [options]
 Uninstall the server LaunchAgent:
 
 ```bash
-calendar-sse server uninstall [options]
+calendar-mcp server uninstall [options]
 ```
 
 **Options:**
-- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--name NAME` - LaunchAgent name (default: com.calendar-mcp)
 
 ### `server start` - Start Server
 
 Start the server:
 
 ```bash
-calendar-sse server start [options]
+calendar-mcp server start [options]
 ```
 
 **Options:**
-- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--name NAME` - LaunchAgent name (default: com.calendar-mcp)
 
 ### `server stop` - Stop Server
 
 Stop the server:
 
 ```bash
-calendar-sse server stop [options]
+calendar-mcp server stop [options]
 ```
 
 **Options:**
-- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--name NAME` - LaunchAgent name (default: com.calendar-mcp)
 
 ### `server restart` - Restart Server
 
 Restart the server:
 
 ```bash
-calendar-sse server restart [options]
+calendar-mcp server restart [options]
 ```
 
 **Options:**
-- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--name NAME` - LaunchAgent name (default: com.calendar-mcp)
 
 ### `server logs` - View Logs
 
 View server logs:
 
 ```bash
-calendar-sse server logs [options]
+calendar-mcp server logs [options]
 ```
 
 **Options:**
-- `--name NAME` - LaunchAgent name (default: com.calendar-sse-mcp)
+- `--name NAME` - LaunchAgent name (default: com.calendar-mcp)
 - `--level {info,error,all}` - Log level to display (default: all)
 - `--lines N` - Number of log lines to show (default: 10)
 
@@ -243,7 +254,7 @@ calendar-sse server logs [options]
 Run the server directly in the foreground:
 
 ```bash
-calendar-sse server run [options]
+calendar-mcp server run [options]
 ```
 
 **Options:**
@@ -255,17 +266,17 @@ calendar-sse server run [options]
 ### List Available Calendars
 
 ```bash
-calendar-sse cli calendars
+calendar-mcp cli calendars
 ```
 
 ### Create a New Event
 
 ```bash
 # Create a meeting at 10:00 AM today for 1 hour
-calendar-sse cli create --event "Team Meeting" --cal "Work" --start "10:00" --duration "1h"
+calendar-mcp cli create --event "Team Meeting" --cal "Work" --start "10:00" --duration "1h"
 
 # Create an event on a specific date with human-readable times
-calendar-sse cli create --event "Dinner with Friends" --cal "Personal" \
+calendar-mcp cli create --event "Dinner with Friends" --cal "Personal" \
   --date "next Friday" --start "7:30 PM" --duration "2 hours" \
   --location "Joe's Restaurant" --description "Reservation for 4 people"
 ```
@@ -274,10 +285,10 @@ calendar-sse cli create --event "Dinner with Friends" --cal "Personal" \
 
 ```bash
 # Update the event title
-calendar-sse cli update "Work" "CA0C1456-F7C8-4FD5-B8C3-8A2F9D3CE7B9" --summary "Team Sync"
+calendar-mcp cli update "Work" "CA0C1456-F7C8-4FD5-B8C3-8A2F9D3CE7B9" --summary "Team Sync"
 
 # Update multiple fields
-calendar-sse cli update "Work" "CA0C1456-F7C8-4FD5-B8C3-8A2F9D3CE7B9" \
+calendar-mcp cli update "Work" "CA0C1456-F7C8-4FD5-B8C3-8A2F9D3CE7B9" \
   --start-time "2:30 PM" --end-time "3:30 PM" \
   --location "Conference Room B"
 ```
@@ -286,31 +297,58 @@ calendar-sse cli update "Work" "CA0C1456-F7C8-4FD5-B8C3-8A2F9D3CE7B9" \
 
 ```bash
 # Search for events containing "meeting"
-calendar-sse cli search "meeting"
+calendar-mcp cli search "meeting"
 
 # Search in a specific calendar and date range
-calendar-sse cli search "lunch" --calendar "Personal" --start-date "2023-09-01" --end-date "2023-09-30"
+calendar-mcp cli search "lunch" --calendar "Personal" --start-date "2023-09-01" --end-date "2023-09-30"
 
 # Search for events in the next week
-calendar-sse cli search "appointment" --duration "7d"
+calendar-mcp cli search "appointment" --duration "7d"
+```
+
+### Managing Reminders
+
+```bash
+# List all reminder lists
+calendar-mcp cli reminder-lists
+
+# Get reminders from a specific list (default range: -3d to +7d + no due)
+calendar-mcp cli reminders "reminders:iCloud/Tasks"
+
+# Create a reminder
+calendar-mcp cli create-reminder \
+  --list "reminders:iCloud/Tasks" \
+  --title "Buy milk" \
+  --due-date "tomorrow 10am" \
+  --notes "Whole milk"
+
+# Complete a reminder
+calendar-mcp cli complete-reminder "reminders:iCloud/Tasks" "REMINDER_ID"
+
+# Update a reminder
+calendar-mcp cli update-reminder "reminders:iCloud/Tasks" "REMINDER_ID" \
+  --title "Buy milk and eggs" --due-date "2026-07-02 18:00"
+
+# Delete a reminder
+calendar-mcp cli delete-reminder "reminders:iCloud/Tasks" "REMINDER_ID"
 ```
 
 ### Managing the Server
 
 ```bash
-# Install and start the server
-calendar-sse server install --port 5000 --logdir ~/logs
+# Install and start the Launch Agent
+calendar-mcp server install --port 5000 --logdir ~/logs
 
 # View server logs
-calendar-sse server logs --level error
+calendar-mcp server logs --level error
 
 # Restart the server
-calendar-sse server restart
+calendar-mcp server restart
 
 # Uninstall the server
-calendar-sse server uninstall
+calendar-mcp server uninstall
 ```
 
 ## JSON Output
 
-Most commands support a `--json` flag that outputs the results in JSON format, which is useful for scripting and integration with other tools. 
+Most commands support a `--json` flag that outputs the results in JSON format, which is useful for scripting and integration with other tools.

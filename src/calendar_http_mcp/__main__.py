@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Command-line interface for the Calendar MCP Server
+Command-line interface for the calendar-mcp server
 """
 import argparse
 import datetime
@@ -36,7 +36,7 @@ def get_env(key: str, default: Optional[str] = None) -> Optional[str]:
 
 def show_version():
     """Display the package version and exit"""
-    print(f"calendar-sse-mcp version {__version__}")
+    print(f"calendar-http-mcp version {__version__}")
     sys.exit(0)
 
 
@@ -141,10 +141,78 @@ def add_search_parser(subparsers):
     return parser
 
 
+def add_reminder_lists_parser(subparsers):
+    """Add the reminder-lists command parser"""
+    parser = subparsers.add_parser("reminder-lists", help="List all available reminder lists")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=list_reminder_lists_command)
+    return parser
+
+
+def add_reminders_parser(subparsers):
+    """Add the reminders command parser"""
+    parser = subparsers.add_parser("reminders", help="Get reminders from a reminder list")
+    parser.add_argument("calendar", nargs="?", help="Reminder list name or qualified name (optional)")
+    parser.add_argument("--start-date", help="Start date in flexible format")
+    parser.add_argument("--end-date", help="End date in flexible format")
+    parser.add_argument("--no-completed", action="store_true", help="Exclude completed reminders")
+    parser.add_argument("--no-no-due", action="store_true", help="Exclude reminders without a due date")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=get_reminders_command)
+    return parser
+
+
+def add_create_reminder_parser(subparsers):
+    """Add the create-reminder command parser"""
+    parser = subparsers.add_parser("create-reminder", help="Create a new reminder")
+    parser.add_argument("--list", dest="reminder_list", required=True, help="Reminder list name or qualified name")
+    parser.add_argument("--title", required=True, help="Reminder title")
+    parser.add_argument("--due-date", help="Due date in flexible format")
+    parser.add_argument("--notes", help="Reminder notes")
+    parser.add_argument("--priority", type=int, help="Priority (0=None, 1=High, 5=Low, 9=Medium)")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=create_reminder_command)
+    return parser
+
+
+def add_update_reminder_parser(subparsers):
+    """Add the update-reminder command parser"""
+    parser = subparsers.add_parser("update-reminder", help="Update an existing reminder")
+    parser.add_argument("list", help="Reminder list name or qualified name")
+    parser.add_argument("reminder_id", help="ID of the reminder to update")
+    parser.add_argument("--title", help="New reminder title")
+    parser.add_argument("--due-date", help="New due date in flexible format")
+    parser.add_argument("--notes", help="New notes")
+    parser.add_argument("--priority", type=int, help="New priority")
+    parser.add_argument("--completed", type=str, choices=["true", "false"], help="Set completed state")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=update_reminder_command)
+    return parser
+
+
+def add_complete_reminder_parser(subparsers):
+    """Add the complete-reminder command parser"""
+    parser = subparsers.add_parser("complete-reminder", help="Mark a reminder as completed")
+    parser.add_argument("list", help="Reminder list name or qualified name")
+    parser.add_argument("reminder_id", help="ID of the reminder to complete")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=complete_reminder_command)
+    return parser
+
+
+def add_delete_reminder_parser(subparsers):
+    """Add the delete-reminder command parser"""
+    parser = subparsers.add_parser("delete-reminder", help="Delete a reminder")
+    parser.add_argument("list", help="Reminder list name or qualified name")
+    parser.add_argument("reminder_id", help="ID of the reminder to delete")
+    parser.add_argument("--json", action="store_true", help="Output in JSON format")
+    parser.set_defaults(func=delete_reminder_command)
+    return parser
+
+
 def create_cli_parser(subparsers):
     """Create the CLI command parser"""
     cli_parser = subparsers.add_parser("cli", help="Direct calendar operations")
-    cli_parser.add_argument("--dev", action="store_true", help="Connect to development server (port 27213)")
     cli_subparsers = cli_parser.add_subparsers(dest="cli_command", help="Calendar operation", required=True)
     
     # Add calendar operations to cli_subparsers
@@ -154,7 +222,13 @@ def create_cli_parser(subparsers):
     add_update_parser(cli_subparsers)
     add_delete_parser(cli_subparsers)
     add_search_parser(cli_subparsers)
-    
+    add_reminder_lists_parser(cli_subparsers)
+    add_reminders_parser(cli_subparsers)
+    add_create_reminder_parser(cli_subparsers)
+    add_update_reminder_parser(cli_subparsers)
+    add_complete_reminder_parser(cli_subparsers)
+    add_delete_reminder_parser(cli_subparsers)
+
     return cli_parser
 
 
@@ -163,7 +237,7 @@ def create_cli_parser(subparsers):
 def add_start_parser(subparsers):
     """Add the start command parser"""
     parser = subparsers.add_parser("start", help="Start the server")
-    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--name", default="com.calendar-mcp", help="Launch Agent name")
     parser.set_defaults(func=server_start_command)
     return parser
 
@@ -171,7 +245,7 @@ def add_start_parser(subparsers):
 def add_stop_parser(subparsers):
     """Add the stop command parser"""
     parser = subparsers.add_parser("stop", help="Stop the server")
-    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--name", default="com.calendar-mcp", help="Launch Agent name")
     parser.set_defaults(func=server_stop_command)
     return parser
 
@@ -179,7 +253,7 @@ def add_stop_parser(subparsers):
 def add_restart_parser(subparsers):
     """Add the restart command parser"""
     parser = subparsers.add_parser("restart", help="Restart the server")
-    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--name", default="com.calendar-mcp", help="Launch Agent name")
     parser.set_defaults(func=server_restart_command)
     return parser
 
@@ -189,9 +263,9 @@ def add_install_parser(subparsers):
     parser = subparsers.add_parser("install", help="Install the server as a LaunchAgent")
     # Basic options
     parser.add_argument("--port", type=int, default=27212, help="Server port (default: 27212)")
-    parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
+    parser.add_argument("--host", default="0.0.0.0", help="Server host (default: 0.0.0.0, accepts both 127.0.0.1 and localhost)")
     parser.add_argument("--logdir", default="/tmp", help="Log directory (default: /tmp)")
-    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--name", default="com.calendar-mcp", help="Launch Agent name")
     
     # Installation options
     parser.add_argument("--no-load", action="store_true", help="Don't load the agent after creation")
@@ -215,7 +289,7 @@ def add_install_parser(subparsers):
 def add_uninstall_parser(subparsers):
     """Add the uninstall command parser"""
     parser = subparsers.add_parser("uninstall", help="Uninstall the server LaunchAgent")
-    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--name", default="com.calendar-mcp", help="Launch Agent name")
     parser.add_argument("--dev", action="store_true", help="Uninstall development server (on port 27213)")
     parser.set_defaults(func=server_uninstall_command)
     return parser
@@ -231,7 +305,7 @@ def add_uninstall_dev_parser(subparsers):
 def add_logs_parser(subparsers):
     """Add the logs command parser"""
     parser = subparsers.add_parser("logs", help="Display server logs")
-    parser.add_argument("--name", default="com.calendar-sse-mcp", help="Launch Agent name")
+    parser.add_argument("--name", default="com.calendar-mcp", help="Launch Agent name")
     parser.add_argument("--level", choices=["info", "error", "all"], default="all", 
                        help="Log level to display (info=stdout, error=stderr, all=both)")
     parser.add_argument("--lines", type=int, default=10, help="Number of log lines to show")
@@ -242,9 +316,11 @@ def add_logs_parser(subparsers):
 def add_run_parser(subparsers):
     """Add the run command parser"""
     parser = subparsers.add_parser("run", help="Run the server directly in the foreground")
-    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
+    parser.add_argument("--host", default=None, help="Host to bind to (default: from SERVER_HOST env or 0.0.0.0)")
     parser.add_argument("--port", type=int, default=27212, help="Port to bind to")
     parser.add_argument("--dev", action="store_true", help="Run on development port (27213)")
+    parser.add_argument("--transport", "-t", choices=["stdio", "streamable-http"],
+                       default=None, help="Transport protocol (default: from SERVER_TRANSPORT env or streamable-http)")
     parser.set_defaults(func=run_server_command)
     return parser
 
@@ -271,10 +347,6 @@ def create_server_parser(subparsers):
 def list_calendars_command(args: argparse.Namespace) -> None:
     """List all available calendars"""
     try:
-        # Get server port - use dev port if specified
-        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
-        
-        # Use the global calendar store instance instead of creating a new one
         store = get_calendar_store()
         calendars = store.get_all_calendars()
         
@@ -295,9 +367,6 @@ def list_calendars_command(args: argparse.Namespace) -> None:
 def get_events_command(args: argparse.Namespace) -> None:
     """Get events from a calendar"""
     try:
-        # Get server port - use dev port if specified
-        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
-        
         # Handle date ranges by adjusting time components
         start_date = args.start_date
         end_date = args.end_date
@@ -336,9 +405,6 @@ def get_events_command(args: argparse.Namespace) -> None:
 def create_event_command_v2(args: argparse.Namespace) -> None:
     """Create a new event with flexible time parsing"""
     try:
-        # Get server port - use dev port if specified
-        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
-        
         # Get calendar from args or env
         calendar = args.calendar or get_env("DEFAULT_CALENDAR")
         if not calendar:
@@ -442,9 +508,6 @@ def create_event_command_v2(args: argparse.Namespace) -> None:
 def update_event_command(args: argparse.Namespace) -> None:
     """Update an existing event"""
     try:
-        # Get server port - use dev port if specified
-        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
-        
         # Format ISO8601 dates if provided
         start_date = None
         if args.date and args.start_time:
@@ -487,10 +550,6 @@ def update_event_command(args: argparse.Namespace) -> None:
 def delete_event_command(args: argparse.Namespace) -> None:
     """Delete an event"""
     try:
-        # Get server port - use dev port if specified
-        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
-        
-        # Create a CalendarStore instance
         store = get_calendar_store()
         success = store.delete_event(
             event_id=args.event_id,
@@ -516,46 +575,29 @@ def delete_event_command(args: argparse.Namespace) -> None:
 
 
 def search_events_command(args: argparse.Namespace) -> None:
-    """Search for events"""
+    """Search for events using the enhanced server logic"""
     try:
-        # Get server port - use dev port if specified
-        port = 27213 if hasattr(args, 'dev') and args.dev else 27212
-        
-        # Get calendar from args, but don't default to DEFAULT_CALENDAR
-        # This allows searching across all calendars when not specified
-        calendar_name = args.calendar
-        
-        # Handle date ranges by adjusting time components
-        start_date = args.start_date
-        end_date = args.end_date
-        
-        # If start_date is provided and doesn't have time component, add beginning of day
-        if start_date and len(start_date) == 10:  # YYYY-MM-DD format (10 chars)
-            start_date = f"{start_date}T00:00:00"
-            
-        # If end_date is provided and doesn't have time component, add end of day
-        if end_date and len(end_date) == 10:  # YYYY-MM-DD format (10 chars)
-            end_date = f"{end_date}T23:59:59"
-        
-        # Create a CalendarStore instance
-        store = get_calendar_store()
-        events = store.get_events(
-            calendar_name=calendar_name,
-            start_date=start_date,
-            end_date=end_date
+        # Import the enhanced search_events function from server
+        from .server import search_events
+
+        # Use the enhanced search_events function with the same logic as the server
+        result = search_events(
+            query=args.query,
+            calendar_name=args.calendar,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            duration=args.duration
         )
-        
-        # Filter events by query
-        query = args.query.lower()
-        matching_events = [
-            event for event in events
-            if (
-                query in event["summary"].lower() or
-                query in (event["description"] or "").lower() or
-                query in (event["location"] or "").lower()
-            )
-        ]
-        
+
+        # Parse the JSON result from the search_events function
+        parsed_result = json.loads(result)
+
+        if "error" in parsed_result:
+            print(f"Error: {parsed_result['error']}", file=sys.stderr)
+            sys.exit(1)
+
+        matching_events = parsed_result.get("events", [])
+
         if args.json:
             print(json.dumps(matching_events, indent=2, ensure_ascii=False))
         else:
@@ -572,26 +614,201 @@ def search_events_command(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def list_reminder_lists_command(args: argparse.Namespace) -> None:
+    """List all available reminder lists"""
+    try:
+        store = get_calendar_store()
+        lists = store.get_all_reminder_lists()
+        if args.json:
+            print(json.dumps(lists, indent=2, ensure_ascii=False))
+        else:
+            print("Available reminder lists:")
+            for item in lists:
+                print(f"- {item['qualified_name']} ({item['title']} / {item['source']})")
+    except CalendarStoreError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def get_reminders_command(args: argparse.Namespace) -> None:
+    """Get reminders from a reminder list"""
+    try:
+        store = get_calendar_store()
+        reminders = store.get_reminders(
+            calendar_name=args.calendar,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            include_completed=not args.no_completed,
+            include_no_due=not args.no_no_due,
+        )
+        if args.json:
+            print(json.dumps(reminders, indent=2, ensure_ascii=False))
+        else:
+            target = args.calendar or "all reminder lists"
+            print(f"Reminders in {target}:")
+            for r in reminders:
+                due = r["due_date"] or "no due"
+                status = "✓" if r["completed"] else "○"
+                print(f"- {status} {r['title']} | due={due} | list={r['qualified_name']}")
+    except CalendarStoreError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _format_due_date(due_date: Optional[str]) -> Optional[str]:
+    """Format a due date string for the calendar store (ISO 8601)."""
+    if not due_date:
+        return None
+    parsed = dateparser.parse(due_date)
+    if not parsed:
+        raise ValueError(f"Could not parse due date: {due_date}")
+    return parsed.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def create_reminder_command(args: argparse.Namespace) -> None:
+    """Create a new reminder"""
+    try:
+        due = _format_due_date(args.due_date) if args.due_date else None
+        store = get_calendar_store()
+        reminder_id = store.create_reminder(
+            calendar_name=args.reminder_list,
+            title=args.title,
+            due_date=due,
+            notes=args.notes,
+            priority=args.priority
+        )
+        if args.json:
+            print(json.dumps({"success": True, "reminder_id": reminder_id}, ensure_ascii=False))
+        else:
+            print(f"Reminder created: {reminder_id}")
+    except CalendarStoreError as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": f"Unexpected error: {e}"}, ensure_ascii=False))
+        else:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def update_reminder_command(args: argparse.Namespace) -> None:
+    """Update an existing reminder"""
+    try:
+        due = _format_due_date(args.due_date) if args.due_date else None
+        completed = None
+        if args.completed is not None:
+            completed = args.completed == "true"
+        store = get_calendar_store()
+        success = store.update_reminder(
+            reminder_id=args.reminder_id,
+            calendar_name=args.list,
+            title=args.title,
+            due_date=due,
+            notes=args.notes,
+            priority=args.priority,
+            completed=completed
+        )
+        if args.json:
+            print(json.dumps({"success": success}, ensure_ascii=False))
+        else:
+            print("Reminder updated successfully!")
+    except CalendarStoreError as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": f"Unexpected error: {e}"}, ensure_ascii=False))
+        else:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def complete_reminder_command(args: argparse.Namespace) -> None:
+    """Mark a reminder as completed"""
+    try:
+        store = get_calendar_store()
+        success = store.complete_reminder(
+            reminder_id=args.reminder_id,
+            calendar_name=args.list
+        )
+        if args.json:
+            print(json.dumps({"success": success}, ensure_ascii=False))
+        else:
+            print("Reminder completed successfully!")
+    except CalendarStoreError as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": f"Unexpected error: {e}"}, ensure_ascii=False))
+        else:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def delete_reminder_command(args: argparse.Namespace) -> None:
+    """Delete a reminder"""
+    try:
+        store = get_calendar_store()
+        success = store.delete_reminder(
+            reminder_id=args.reminder_id,
+            calendar_name=args.list
+        )
+        if args.json:
+            print(json.dumps({"success": success}, ensure_ascii=False))
+        else:
+            print("Reminder deleted successfully!")
+    except CalendarStoreError as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        if args.json:
+            print(json.dumps({"success": False, "error": f"Unexpected error: {e}"}, ensure_ascii=False))
+        else:
+            print(f"Unexpected error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 # ----- Server Command Handlers -----
 
 def run_server_command(args: argparse.Namespace) -> None:
     """Run the MCP server"""
-    # Get server port - use dev port if specified
-    port = 27213 if hasattr(args, 'dev') and args.dev else args.port or get_env("SERVER_PORT", "27212")
-    host = args.host or get_env("SERVER_HOST", "127.0.0.1")
-    
-    # Set environment variables for the server
-    os.environ["SERVER_HOST"] = str(host)
-    os.environ["SERVER_PORT"] = str(port)
-    
-    print(f"Starting server on {host}:{port}...")
-    
-    # Set the settings directly on the mcp object
-    mcp.settings.port = port
-    mcp.settings.host = host
-    
-    # Run the server with SSE transport
-    mcp.run(transport="sse")
+    transport = args.transport or get_env("SERVER_TRANSPORT", "streamable-http")
+    os.environ["SERVER_TRANSPORT"] = transport
+
+    if transport == "stdio":
+        print("Starting Calendar MCP server with STDIO transport...", file=sys.stderr)
+        mcp.run(transport="stdio")
+    else:
+        port = 27213 if hasattr(args, 'dev') and args.dev else (args.port or int(get_env("SERVER_PORT", "27212")))
+        host = args.host or get_env("SERVER_HOST", "0.0.0.0")
+        os.environ["SERVER_HOST"] = str(host)
+        os.environ["SERVER_PORT"] = str(port)
+
+        print(f"Starting server on {host}:{port} with {transport} transport...", file=sys.stderr)
+
+        mcp.settings.port = port
+        mcp.settings.host = host
+        mcp.run(transport=transport)
 
 
 def server_install_command(args: argparse.Namespace) -> None:
@@ -617,11 +834,15 @@ def server_install_command(args: argparse.Namespace) -> None:
             print(f"Error removing existing plist: {e}", file=sys.stderr)
             sys.exit(1)
     
+    # Get host from args (defaults to 0.0.0.0)
+    host = args.host
+    
     # Create and install the Launch Agent
-    print(f"Installing Launch Agent '{agent_name}' with port {port}...")
+    print(f"Installing Launch Agent '{agent_name}' with port {port} on host {host}...")
     success, message, new_plist_path = create_launch_agent(
         agent_name=agent_name,
         port=port,
+        host=host,
         log_dir=args.logdir,
         auto_load=not args.no_load
     )
@@ -640,7 +861,7 @@ def server_uninstall_command(args: argparse.Namespace) -> None:
     """Uninstall the server Launch Agent"""
     # If --dev is specified, use the dev agent name
     if hasattr(args, 'dev') and args.dev:
-        agent_name = "com.calendar-sse-mcp.dev"
+        agent_name = "com.calendar-mcp.dev"
         print(f"Uninstalling DEVELOPMENT server agent '{agent_name}'...")
     else:
         agent_name = args.name
@@ -659,7 +880,7 @@ def server_start_command(args: argparse.Namespace) -> None:
     plist_path = _get_launch_agent_plist_path(agent_name)
     
     if not plist_path.exists():
-        print(f"Error: Launch Agent '{agent_name}' is not installed. Install it first with 'calendar-sse server install'", 
+        print(f"Error: Launch Agent '{agent_name}' is not installed. Install it first with 'calendar-mcp server install'", 
               file=sys.stderr)
         sys.exit(1)
     
@@ -748,7 +969,7 @@ def server_logs_command(args: argparse.Namespace) -> None:
 
 def server_uninstall_dev_command(args: argparse.Namespace) -> None:
     """Uninstall the development server Launch Agent"""
-    agent_name = "com.calendar-sse-mcp.dev"
+    agent_name = "com.calendar-mcp.dev"
     print(f"Uninstalling development server agent '{agent_name}'...")
     
     success, message = uninstall_launch_agent(agent_name=agent_name)
@@ -761,8 +982,8 @@ def server_uninstall_dev_command(args: argparse.Namespace) -> None:
 # ----- Main Entry Point -----
 
 def main():
-    """Main entry point for the calendar-sse CLI"""
-    parser = argparse.ArgumentParser(description="Calendar SSE MCP Tool")
+    """Main entry point for the calendar-mcp CLI"""
+    parser = argparse.ArgumentParser(description="calendar-http-mcp Tool")
     parser.add_argument("--version", action="store_true", help="Show version information and exit")
     
     # Add subparsers for "cli" and "server" commands
@@ -798,6 +1019,44 @@ def main():
 
 # For backward compatibility with existing entry points
 cli_main = main
+
+
+# ----- Standalone entry points -----
+
+def run_stdio():
+    """Entry point for calendar-stdio: run MCP server with STDIO transport."""
+    from .server import mcp
+    mcp.run(transport="stdio")
+
+
+def cli_entry():
+    """Entry point for calendar-cli: flattened CLI for calendar operations."""
+    parser = argparse.ArgumentParser(description="calendar-cli - macOS Calendar operations")
+    parser.add_argument("--version", action="store_true", help="Show version information and exit")
+
+    subparsers = parser.add_subparsers(dest="command", help="Calendar operation")
+    add_calendars_parser(subparsers)
+    add_events_parser(subparsers)
+    add_create_parser(subparsers)
+    add_update_parser(subparsers)
+    add_delete_parser(subparsers)
+    add_search_parser(subparsers)
+    add_reminder_lists_parser(subparsers)
+    add_reminders_parser(subparsers)
+    add_create_reminder_parser(subparsers)
+    add_update_reminder_parser(subparsers)
+    add_complete_reminder_parser(subparsers)
+    add_delete_reminder_parser(subparsers)
+
+    args = parser.parse_args()
+
+    if args.version:
+        show_version()
+
+    if hasattr(args, 'func'):
+        args.func(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":

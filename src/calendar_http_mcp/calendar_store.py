@@ -7,18 +7,20 @@ import sys
 import time
 import datetime
 import threading
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 
 from EventKit import (
     EKCalendarEventAvailabilityBusy,
     EKEntityTypeEvent,
+    EKEntityTypeReminder,
     EKEventStore,
     EKEvent,
+    EKReminder,
     EKCalendar,
     EKAlarm,
     EKSpanThisEvent
 )
-from Foundation import NSDate, NSDefaultRunLoopMode, NSRunLoop, NSURL
+from Foundation import NSDate, NSDefaultRunLoopMode, NSRunLoop, NSURL, NSCalendar, NSDateComponents
 
 
 class CalendarStoreError(Exception):
@@ -39,6 +41,7 @@ class CalendarStore:
         """
         self.event_store = EKEventStore.alloc().init()
         self.authorized = False
+        self.authorized_for_reminders = False
         self.quiet = quiet
         self.port = port
         self._last_health_check = 0
@@ -452,17 +455,35 @@ class CalendarStore:
     def _nsdate_to_iso(self, date: NSDate) -> str:
         """
         Convert NSDate to ISO 8601 formatted string.
-        
+
         Args:
             date: NSDate object to convert
-            
+
         Returns:
             ISO 8601 formatted date string
         """
         time_interval = date.timeIntervalSince1970()
         dt = datetime.datetime.fromtimestamp(time_interval)
         return dt.strftime("%Y-%m-%dT%H:%M:%S")
-        
+
+    def _components_to_iso(self, components) -> Optional[str]:
+        """
+        Convert NSDateComponents to ISO 8601 formatted string.
+
+        Args:
+            components: NSDateComponents object (e.g. dueDateComponents)
+
+        Returns:
+            ISO 8601 formatted date string, or None if components is None
+        """
+        if components is None:
+            return None
+        calendar = NSCalendar.currentCalendar()
+        ns_date = calendar.dateFromComponents_(components)
+        if ns_date is None:
+            return None
+        return self._nsdate_to_iso(ns_date)
+
     def _parse_iso_date(self, date_str: str) -> Tuple[NSDate, bool]:
         """
         Parse ISO 8601 date string to NSDate.
@@ -760,5 +781,590 @@ class CalendarStore:
         if not success:
             error_str = error.localizedDescription() if error else "Unknown error"
             raise CalendarStoreError(f"Failed to delete event: {error_str}")
-            
-        return True 
+
+        return True
+
+    # -------------------------------------------------------------------------
+    # Reminders
+    # -------------------------------------------------------------------------
+
+    def request_reminder_authorization(self) -> bool:
+        """
+        Request access to reminders with improved error handling.
+
+        Returns:
+            True if authorization was granted, False otherwise
+        """
+        with self._auth_lock:
+            if self.authorized_for_reminders:
+                return True
+
+            if not self.quiet:
+                print("Requesting access to your reminders...", file=sys.stderr)
+
+            result = {"authorized": False, "complete": False}
+
+            def auth_callback(granted: bool, error: Any) -> None:
+                result["authorized"] = granted
+                result["complete"] = True
+                if error and not self.quiet:
+                    print(f"Reminders authorization error: {error}", file=sys.stderr)
+
+            try:
+                self.event_store.requestAccessToEntityType_completion_(
+                    EKEntityTypeReminder, auth_callback
+                )
+
+                timeout = 15
+                start_time = time.time()
+                while not result["complete"]:
+                    NSRunLoop.currentRunLoop().runMode_beforeDate_(
+                        NSDefaultRunLoopMode, NSDate.dateWithTimeIntervalSinceNow_(0.1)
+                    )
+                    if time.time() - start_time > timeout:
+                        if not self.quiet:
+                            print("Timed out waiting for reminders authorization", file=sys.stderr)
+                        break
+
+                self.authorized_for_reminders = result["authorized"]
+                if self.authorized_for_reminders:
+                    self._last_health_check = time.time()
+                    if not self.quiet:
+                        print("Reminders access authorized", file=sys.stderr)
+                elif not self.quiet:
+                    print(
+                        "Reminders access denied. "
+                        "Enable it in System Settings > Privacy & Security > Reminders.",
+                        file=sys.stderr
+                    )
+
+                return self.authorized_for_reminders
+
+            except Exception as e:
+                if not self.quiet:
+                    print(f"Reminders authorization request failed: {e}", file=sys.stderr)
+                self.authorized_for_reminders = False
+                return False
+
+    def _check_reminder_authorization(self) -> None:
+        """
+        Check if the store is authorized for reminders.
+
+        Raises:
+            CalendarStoreError: If not authorized to access reminders
+        """
+        if not self.authorized_for_reminders:
+            if not self.request_reminder_authorization():
+                if not self.quiet:
+                    print("Not authorized to access reminders", file=sys.stderr)
+                raise CalendarStoreError(
+                    "Not authorized to access reminders. "
+                    "Grant permission in System Settings > Privacy & Security > Reminders, "
+                    "then retry."
+                )
+
+    def _get_reminder_lists(self) -> List[Any]:
+        """
+        Get all reminder lists (EKCalendar objects for reminders).
+
+        Returns:
+            List of EKCalendar objects
+        """
+        self._check_reminder_authorization()
+        return list(self.event_store.calendarsForEntityType_(EKEntityTypeReminder) or [])
+
+    def _qualified_reminder_list_name(self, calendar) -> str:
+        """
+        Build a qualified name for a reminder list that includes its source.
+
+        Args:
+            calendar: EKCalendar representing a reminder list
+
+        Returns:
+            Qualified name in the form 'reminders:source/title'
+        """
+        source = calendar.source()
+        source_title = source.title() if source else "Unknown"
+        return f"reminders:{source_title}/{calendar.title()}"
+
+    def _find_reminder_list(self, name: str) -> Optional[Any]:
+        """
+        Find a reminder list by qualified name or plain title.
+
+        Args:
+            name: Qualified name ('reminders:source/title') or plain title
+
+        Returns:
+            EKCalendar object or None
+        """
+        for calendar in self._get_reminder_lists():
+            if name == self._qualified_reminder_list_name(calendar):
+                return calendar
+            if name == calendar.title():
+                return calendar
+        return None
+
+    def get_all_reminder_lists(self) -> List[Dict[str, Any]]:
+        """
+        Get a list of all available reminder lists.
+
+        Returns:
+            List of reminder list dictionaries with qualified names
+        """
+        try:
+            return self._get_all_reminder_lists_impl()
+        except CalendarStoreError:
+            raise
+        except Exception as e:
+            if self.refresh_if_needed():
+                try:
+                    return self._get_all_reminder_lists_impl()
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to get reminder lists after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to get reminder lists: {e}")
+
+    def _get_all_reminder_lists_impl(self) -> List[Dict[str, Any]]:
+        """
+        Internal implementation of get_all_reminder_lists.
+        """
+        result = []
+        for calendar in self._get_reminder_lists():
+            source = calendar.source()
+            source_title = source.title() if source else "Unknown"
+            result.append({
+                "qualified_name": self._qualified_reminder_list_name(calendar),
+                "title": calendar.title(),
+                "source": source_title,
+                "calendar_identifier": calendar.calendarIdentifier(),
+                "allows_content_modifications": bool(calendar.allowsContentModifications()),
+            })
+        return result
+
+    def _fetch_reminders_with_predicate(self, predicate) -> List[Any]:
+        """
+        Fetch reminders matching a predicate asynchronously and wait for result.
+
+        Args:
+            predicate: NSPredicate for reminders
+
+        Returns:
+            List of EKReminder objects
+        """
+        fetched: List[Any] = []
+        complete = {"done": False}
+
+        def on_reminders(reminders) -> None:
+            fetched.extend(list(reminders or []))
+            complete["done"] = True
+
+        self.event_store.fetchRemindersMatchingPredicate_completion_(predicate, on_reminders)
+
+        timeout = 15
+        start_time = time.time()
+        while not complete["done"]:
+            NSRunLoop.currentRunLoop().runMode_beforeDate_(
+                NSDefaultRunLoopMode, NSDate.dateWithTimeIntervalSinceNow_(0.1)
+            )
+            if time.time() - start_time > timeout:
+                if not self.quiet:
+                    print("Timed out fetching reminders", file=sys.stderr)
+                break
+
+        return fetched
+
+    def _reminder_to_dict(self, reminder) -> Dict[str, Any]:
+        """
+        Format an EKReminder as a dictionary.
+
+        Args:
+            reminder: EKReminder object
+
+        Returns:
+            Dictionary representation of the reminder
+        """
+        calendar = reminder.calendar()
+        source = calendar.source() if calendar else None
+        source_title = source.title() if source else "Unknown"
+        return {
+            "id": reminder.calendarItemIdentifier(),
+            "title": reminder.title(),
+            "list_name": calendar.title() if calendar else "",
+            "source": source_title,
+            "qualified_name": self._qualified_reminder_list_name(calendar) if calendar else "",
+            "due_date": self._components_to_iso(reminder.dueDateComponents()),
+            "start_date": self._components_to_iso(reminder.startDateComponents()),
+            "completed": bool(reminder.isCompleted()),
+            "completion_date": self._nsdate_to_iso(reminder.completionDate()) if reminder.completionDate() else None,
+            "notes": reminder.notes() or "",
+            "priority": int(reminder.priority()),
+        }
+
+    def _parse_datetime(self, value: Optional[Union[str, datetime.datetime]]) -> Optional[datetime.datetime]:
+        """
+        Parse a date string or datetime into a datetime object.
+
+        Args:
+            value: Date string (ISO 8601) or datetime
+
+        Returns:
+            datetime object or None
+        """
+        if value is None:
+            return None
+        if isinstance(value, datetime.datetime):
+            return value
+        try:
+            return datetime.datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    def get_reminders(
+        self,
+        calendar_name: Optional[str] = None,
+        start_date: Optional[Union[str, datetime.datetime]] = None,
+        end_date: Optional[Union[str, datetime.datetime]] = None,
+        include_completed: bool = True,
+        include_no_due: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get reminders from reminder lists.
+
+        Args:
+            calendar_name: Optional qualified name or title of a reminder list
+            start_date: Optional start of due date range (ISO string or datetime)
+            end_date: Optional end of due date range (ISO string or datetime)
+            include_completed: Whether to include completed reminders
+            include_no_due: Whether to include reminders without a due date
+
+        Returns:
+            List of reminder dictionaries
+
+        Raises:
+            CalendarStoreError: If not authorized or list not found
+        """
+        try:
+            return self._get_reminders_impl(
+                calendar_name, start_date, end_date, include_completed, include_no_due
+            )
+        except CalendarStoreError:
+            raise
+        except Exception as e:
+            if self.refresh_if_needed():
+                try:
+                    return self._get_reminders_impl(
+                        calendar_name, start_date, end_date, include_completed, include_no_due
+                    )
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to get reminders after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to get reminders: {e}")
+
+    def _get_reminders_impl(
+        self,
+        calendar_name: Optional[str],
+        start_date: Optional[Union[str, datetime.datetime]],
+        end_date: Optional[Union[str, datetime.datetime]],
+        include_completed: bool,
+        include_no_due: bool,
+    ) -> List[Dict[str, Any]]:
+        """
+        Internal implementation of get_reminders.
+        """
+        self._check_reminder_authorization()
+
+        # Determine target lists
+        calendars = None
+        if calendar_name:
+            calendar = self._find_reminder_list(calendar_name)
+            if not calendar:
+                raise CalendarStoreError(f"Reminder list '{calendar_name}' not found")
+            calendars = [calendar]
+        else:
+            calendars = self._get_reminder_lists()
+
+        # Default date range: -3 days to +7 days
+        now = datetime.datetime.now()
+        if start_date is None:
+            start_dt = (now - datetime.timedelta(days=3)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        else:
+            start_dt = self._parse_datetime(start_date)
+            if start_dt is None:
+                raise CalendarStoreError(f"Invalid start date: {start_date}")
+
+        if end_date is None:
+            end_dt = (now + datetime.timedelta(days=7)).replace(
+                hour=23, minute=59, second=59, microsecond=0
+            )
+        else:
+            end_dt = self._parse_datetime(end_date)
+            if end_dt is None:
+                raise CalendarStoreError(f"Invalid end date: {end_date}")
+
+        if end_dt < start_dt:
+            raise CalendarStoreError("End date cannot be before start date")
+
+        # Fetch reminders
+        predicate = self.event_store.predicateForRemindersInCalendars_(calendars)
+        reminders = self._fetch_reminders_with_predicate(predicate)
+
+        # Filter and format
+        result = []
+        for reminder in reminders:
+            if not include_completed and reminder.isCompleted():
+                continue
+
+            due_iso = self._components_to_iso(reminder.dueDateComponents())
+            if due_iso is None:
+                if not include_no_due:
+                    continue
+            else:
+                due_dt = self._parse_datetime(due_iso)
+                if due_dt is None or due_dt < start_dt or due_dt > end_dt:
+                    continue
+
+            result.append(self._reminder_to_dict(reminder))
+
+        return result
+
+    # -------------------------------------------------------------------------
+    # Reminder CRUD
+    # -------------------------------------------------------------------------
+
+    def _get_reminder_by_id(self, reminder_id: str) -> Optional[Any]:
+        """
+        Fetch a reminder by its calendar item identifier.
+
+        Args:
+            reminder_id: The reminder's unique identifier
+
+        Returns:
+            EKReminder object or None
+        """
+        item = self.event_store.calendarItemWithIdentifier_(reminder_id)
+        if item is None:
+            return None
+        # calendarItemWithIdentifier: can return events or reminders
+        try:
+            # Attempt to treat it as a reminder by checking isCompleted
+            item.isCompleted()
+            return item
+        except Exception:
+            return None
+
+    def _datetime_to_components(self, value: Union[str, datetime.datetime]) -> NSDateComponents:
+        """
+        Convert an ISO string or datetime into NSDateComponents for a reminder.
+
+        Args:
+            value: ISO date string or datetime
+
+        Returns:
+            NSDateComponents with year/month/day and optionally hour/minute
+        """
+        if isinstance(value, str):
+            dt = datetime.datetime.fromisoformat(value)
+        else:
+            dt = value
+
+        components = NSDateComponents.alloc().init()
+        components.setYear_(dt.year)
+        components.setMonth_(dt.month)
+        components.setDay_(dt.day)
+
+        # If time is not exactly midnight, include it
+        if dt.hour != 0 or dt.minute != 0:
+            components.setHour_(dt.hour)
+            components.setMinute_(dt.minute)
+
+        return components
+
+    def _parse_qualified_list_name(self, name: str) -> Tuple[str, str]:
+        """
+        Split a qualified list name into source and title.
+
+        Args:
+            name: Qualified name like 'reminders:iCloud/Tasks' or plain 'Tasks'
+
+        Returns:
+            Tuple of (source_or_empty, title)
+        """
+        if name.startswith("reminders:"):
+            inner = name[len("reminders:"):]
+            if "/" in inner:
+                source, title = inner.split("/", 1)
+                return source, title
+        return "", name
+
+    def create_reminder(
+        self,
+        calendar_name: str,
+        title: str,
+        due_date: Optional[Union[str, datetime.datetime]] = None,
+        notes: Optional[str] = None,
+        priority: Optional[int] = None,
+    ) -> str:
+        """
+        Create a new reminder in an existing reminder list.
+
+        Args:
+            calendar_name: Existing reminder list name or qualified name
+            title: Reminder title
+            due_date: Optional due date (ISO string or datetime)
+            notes: Optional notes
+            priority: Optional priority (0=None, 1=High, 5=Low, 9=Medium)
+
+        Returns:
+            ID of the created reminder
+
+        Raises:
+            CalendarStoreError: If list not found or creation fails
+        """
+        self._check_reminder_authorization()
+
+        calendar = self._find_reminder_list(calendar_name)
+        if not calendar:
+            raise CalendarStoreError(f"Reminder list '{calendar_name}' not found")
+
+        reminder = EKReminder.reminderWithEventStore_(self.event_store)
+        reminder.setTitle_(title)
+        reminder.setCalendar_(calendar)
+
+        if due_date is not None:
+            try:
+                components = self._datetime_to_components(due_date)
+                reminder.setDueDateComponents_(components)
+            except Exception as e:
+                raise CalendarStoreError(f"Invalid due date: {due_date} ({e})")
+
+        if notes is not None:
+            reminder.setNotes_(notes)
+
+        if priority is not None:
+            reminder.setPriority_(priority)
+
+        error = None
+        success = self.event_store.saveReminder_commit_error_(reminder, True, error)
+        if not success:
+            error_str = error.localizedDescription() if error else "Unknown error"
+            raise CalendarStoreError(f"Failed to create reminder: {error_str}")
+
+        return reminder.calendarItemIdentifier()
+
+    def update_reminder(
+        self,
+        reminder_id: str,
+        calendar_name: str,
+        title: Optional[str] = None,
+        due_date: Optional[Union[str, datetime.datetime]] = None,
+        notes: Optional[str] = None,
+        priority: Optional[int] = None,
+        completed: Optional[bool] = None,
+    ) -> bool:
+        """
+        Update an existing reminder.
+
+        Args:
+            reminder_id: ID of the reminder to update
+            calendar_name: Name or qualified name of the list containing the reminder
+            title: Optional new title
+            due_date: Optional new due date
+            notes: Optional new notes
+            priority: Optional new priority
+            completed: Optional completed state
+
+        Returns:
+            True if update was successful
+
+        Raises:
+            CalendarStoreError: If reminder not found or update fails
+        """
+        self._check_reminder_authorization()
+
+        reminder = self._get_reminder_by_id(reminder_id)
+        if not reminder:
+            raise CalendarStoreError(f"Reminder with ID '{reminder_id}' not found")
+
+        expected_list = self._find_reminder_list(calendar_name)
+        if expected_list is None:
+            raise CalendarStoreError(f"Reminder list '{calendar_name}' not found")
+
+        if reminder.calendar().calendarIdentifier() != expected_list.calendarIdentifier():
+            raise CalendarStoreError(f"Reminder is not in list '{calendar_name}'")
+
+        if title is not None:
+            reminder.setTitle_(title)
+
+        if due_date is not None:
+            try:
+                components = self._datetime_to_components(due_date)
+                reminder.setDueDateComponents_(components)
+            except Exception as e:
+                raise CalendarStoreError(f"Invalid due date: {due_date} ({e})")
+
+        if notes is not None:
+            reminder.setNotes_(notes)
+
+        if priority is not None:
+            reminder.setPriority_(priority)
+
+        if completed is not None:
+            reminder.setCompleted_(completed)
+
+        error = None
+        success = self.event_store.saveReminder_commit_error_(reminder, True, error)
+        if not success:
+            error_str = error.localizedDescription() if error else "Unknown error"
+            raise CalendarStoreError(f"Failed to update reminder: {error_str}")
+
+        return True
+
+    def complete_reminder(self, reminder_id: str, calendar_name: str) -> bool:
+        """
+        Mark a reminder as completed.
+
+        Args:
+            reminder_id: ID of the reminder
+            calendar_name: Name or qualified name of the list containing the reminder
+
+        Returns:
+            True if successful
+        """
+        return self.update_reminder(reminder_id, calendar_name, completed=True)
+
+    def delete_reminder(self, reminder_id: str, calendar_name: str) -> bool:
+        """
+        Delete a reminder.
+
+        Args:
+            reminder_id: ID of the reminder to delete
+            calendar_name: Name or qualified name of the list containing the reminder
+
+        Returns:
+            True if deletion was successful
+
+        Raises:
+            CalendarStoreError: If reminder not found or deletion fails
+        """
+        self._check_reminder_authorization()
+
+        reminder = self._get_reminder_by_id(reminder_id)
+        if not reminder:
+            raise CalendarStoreError(f"Reminder with ID '{reminder_id}' not found")
+
+        expected_list = self._find_reminder_list(calendar_name)
+        if expected_list is None:
+            raise CalendarStoreError(f"Reminder list '{calendar_name}' not found")
+
+        if reminder.calendar().calendarIdentifier() != expected_list.calendarIdentifier():
+            raise CalendarStoreError(f"Reminder is not in list '{calendar_name}'")
+
+        error = None
+        success = self.event_store.removeReminder_commit_error_(reminder, True, error)
+        if not success:
+            error_str = error.localizedDescription() if error else "Unknown error"
+            raise CalendarStoreError(f"Failed to delete reminder: {error_str}")
+
+        return True

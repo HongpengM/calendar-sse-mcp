@@ -228,26 +228,92 @@ class CalendarStore:
             else:
                 raise CalendarStoreError(f"Failed to get calendars: {e}")
 
-    def _get_calendar_by_name(self, calendar_name: str) -> Optional[EKCalendar]:
+    def get_all_calendars_detailed(self) -> List[Dict[str, Any]]:
         """
-        Get a calendar by name.
-        
-        Args:
-            calendar_name: Name of calendar to find
-            
+        Get all event calendars with source-qualified details.
+
+        Unlike get_all_calendars (which returns bare titles), this distinguishes
+        same-named calendars from different accounts via their qualified name.
+
         Returns:
-            Calendar object or None if not found
-            
+            List of calendar dictionaries with qualified names
+
         Raises:
             CalendarStoreError: If not authorized to access calendars
         """
         self._check_authorization()
-            
+
+        try:
+            return self._get_all_calendars_detailed_impl()
+        except Exception as e:
+            # If operation fails, try refreshing once and retry
+            if self.refresh_if_needed():
+                try:
+                    return self._get_all_calendars_detailed_impl()
+                except Exception as retry_e:
+                    raise CalendarStoreError(f"Failed to get calendars after refresh: {retry_e}")
+            else:
+                raise CalendarStoreError(f"Failed to get calendars: {e}")
+
+    def _get_all_calendars_detailed_impl(self) -> List[Dict[str, Any]]:
+        """
+        Internal implementation of get_all_calendars_detailed.
+        """
+        result = []
+        calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent) or []
+        for calendar in calendars:
+            source = calendar.source()
+            source_title = source.title() if source else "Unknown"
+            result.append({
+                "qualified_name": self._qualified_calendar_name(calendar),
+                "title": calendar.title(),
+                "source": source_title,
+                "calendar_identifier": calendar.calendarIdentifier(),
+                "allows_content_modifications": bool(calendar.allowsContentModifications()),
+            })
+        return result
+
+    def _qualified_calendar_name(self, calendar: EKCalendar) -> str:
+        """
+        Build a qualified name for a calendar that includes its source (account).
+
+        This mirrors reminder lists (`reminders:source/title`) so that same-named
+        calendars from different accounts can be told apart.
+
+        Args:
+            calendar: EKCalendar representing an event calendar
+
+        Returns:
+            Qualified name in the form 'calendars:source/title'
+        """
+        source = calendar.source()
+        source_title = source.title() if source else "Unknown"
+        return f"calendars:{source_title}/{calendar.title()}"
+
+    def _find_calendar(self, name: str) -> Optional[EKCalendar]:
+        """
+        Find a calendar by qualified name or plain title.
+
+        Args:
+            name: Qualified name ('calendars:source/title') or plain title
+
+        Returns:
+            EKCalendar object or None if not found. When only a plain title is
+            given and several accounts share it, the first match is returned
+            (backward-compatible behaviour).
+
+        Raises:
+            CalendarStoreError: If not authorized to access calendars
+        """
+        self._check_authorization()
+
         calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent)
         for calendar in calendars:
-            if calendar.title() == calendar_name:
+            if name == self._qualified_calendar_name(calendar):
                 return calendar
-                
+            if name == calendar.title():
+                return calendar
+
         return None
 
     def _date_to_nsdate(self, date_str: Optional[str] = None, is_end_date: bool = False) -> NSDate:
@@ -390,7 +456,7 @@ class CalendarStore:
         # Get the specified calendar or all calendars
         calendar_obj = None
         if calendar_name:
-            calendar_obj = self._get_calendar_by_name(calendar_name)
+            calendar_obj = self._find_calendar(calendar_name)
             if not calendar_obj:
                 if not self.quiet:
                     print(f"Calendar '{calendar_name}' not found", file=sys.stderr)
@@ -439,7 +505,13 @@ class CalendarStore:
         
         # Get description, handling missing values
         description = event.notes() if event.notes() else ""
-        
+
+        # Resolve the owning calendar and its source (account) so that
+        # same-named calendars from different accounts stay distinguishable.
+        calendar = event.calendar()
+        source = calendar.source() if calendar else None
+        source_title = source.title() if source else "Unknown"
+
         return {
             "id": event.eventIdentifier(),
             "summary": event.title(),
@@ -447,7 +519,9 @@ class CalendarStore:
             "end": end_time,
             "location": location,
             "description": description,
-            "calendar": event.calendar().title(),
+            "calendar": calendar.title() if calendar else "",
+            "source": source_title,
+            "qualified_name": self._qualified_calendar_name(calendar) if calendar else "",
             "all_day": event.isAllDay(),
             "availability": "busy" if event.availability() == EKCalendarEventAvailabilityBusy else "free"
         }
@@ -583,7 +657,7 @@ class CalendarStore:
         Internal implementation of create_event.
         """
         # Get the calendar
-        calendar = self._get_calendar_by_name(calendar_name)
+        calendar = self._find_calendar(calendar_name)
         if not calendar:
             raise CalendarStoreError(f"Calendar '{calendar_name}' not found")
             
@@ -678,7 +752,7 @@ class CalendarStore:
         Internal implementation of update_event.
         """
         # Get the calendar
-        calendar = self._get_calendar_by_name(calendar_name)
+        calendar = self._find_calendar(calendar_name)
         if not calendar:
             raise CalendarStoreError(f"Calendar '{calendar_name}' not found")
             
@@ -686,11 +760,12 @@ class CalendarStore:
         event = self.event_store.eventWithIdentifier_(event_id)
         if not event:
             raise CalendarStoreError(f"Event with ID '{event_id}' not found")
-            
-        # Check that the event is in the specified calendar
-        if event.calendar().title() != calendar_name:
+
+        # Check that the event is in the specified calendar (by identity, so
+        # qualified names and same-named calendars resolve correctly)
+        if event.calendar().calendarIdentifier() != calendar.calendarIdentifier():
             raise CalendarStoreError(f"Event is not in calendar '{calendar_name}'")
-            
+
         # Update the event properties
         if summary:
             event.setTitle_(summary)
@@ -761,7 +836,7 @@ class CalendarStore:
         Internal implementation of delete_event.
         """
         # Get the calendar
-        calendar = self._get_calendar_by_name(calendar_name)
+        calendar = self._find_calendar(calendar_name)
         if not calendar:
             raise CalendarStoreError(f"Calendar '{calendar_name}' not found")
             
@@ -769,11 +844,12 @@ class CalendarStore:
         event = self.event_store.eventWithIdentifier_(event_id)
         if not event:
             raise CalendarStoreError(f"Event with ID '{event_id}' not found")
-            
-        # Check that the event is in the specified calendar
-        if event.calendar().title() != calendar_name:
+
+        # Check that the event is in the specified calendar (by identity, so
+        # qualified names and same-named calendars resolve correctly)
+        if event.calendar().calendarIdentifier() != calendar.calendarIdentifier():
             raise CalendarStoreError(f"Event is not in calendar '{calendar_name}'")
-            
+
         # Delete the event
         error = None
         success = self.event_store.removeEvent_span_error_(event, EKSpanThisEvent, error)

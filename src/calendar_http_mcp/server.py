@@ -24,6 +24,7 @@ from mcp.server.fastmcp import FastMCP
 from .calendar_store import CalendarStore, CalendarStoreError
 from .models import (
     ApiResponse, CalendarEvent, EventCreate, EventUpdate, EventList, CalendarList,
+    CalendarInfo, CalendarInfoListResponse,
     Reminder, ReminderList, ReminderListResponse, ReminderSearchResponse,
     ReminderCreate, ReminderUpdate
 )
@@ -276,18 +277,21 @@ def get_event(calendar_name: str, event_id: str) -> str:
 @mcp.tool()
 def list_all_calendars() -> str:
     """
-    List all available calendars in Calendar.app
-    
+    List all available calendars in Calendar.app.
+
+    Same-named calendars from different accounts are distinguished by a
+    source-qualified name (e.g. calendars:iCloud/Work vs calendars:Google/Work).
+    Pass either the qualified name or the plain title to other calendar tools.
+
     Returns:
-        JSON string containing calendar names
+        JSON string containing calendars with qualified names and count
     """
     try:
         store = get_calendar_store()
-        calendars = store.get_all_calendars()
-        return json.dumps({
-            "calendars": calendars,
-            "count": len(calendars)
-        }, ensure_ascii=False)
+        raw_calendars = store.get_all_calendars_detailed()
+        calendars = [CalendarInfo(**raw) for raw in raw_calendars]
+        response = CalendarInfoListResponse(calendars=calendars, count=len(calendars))
+        return json.dumps(response.model_dump(mode="json"), ensure_ascii=False)
     except CalendarStoreError as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
     except Exception as e:
@@ -961,7 +965,9 @@ def search_events_prompt(
         for event in matching_events:
             date = event["start"].split("T")[0]
             time = event["start"].split("T")[1][:5]  # Extract HH:MM
-            response += f"- {date} {time}: {event['summary']} (in calendar '{event['calendar']}')\n"
+            source = event.get("source")
+            calendar_label = f"{event['calendar']} — {source}" if source else event["calendar"]
+            response += f"- {date} {time}: {event['summary']} (in calendar '{calendar_label}')\n"
             
         return response
     except CalendarStoreError as e:

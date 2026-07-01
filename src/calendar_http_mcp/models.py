@@ -18,6 +18,8 @@ class CalendarEvent(BaseModel):
     start_date: datetime
     end_date: datetime
     calendar_name: str
+    source: Optional[str] = None
+    qualified_name: Optional[str] = None
     all_day: bool = False
     location: Optional[str] = None
     description: Optional[str] = None
@@ -106,6 +108,21 @@ class EventUpdate(BaseModel):
 class CalendarList(BaseModel):
     """Model for a list of calendars"""
     calendars: List[str]
+    count: int = Field(..., description="Number of calendars")
+
+
+class CalendarInfo(BaseModel):
+    """Model for a source-qualified calendar (distinguishes same-named calendars)"""
+    qualified_name: str
+    title: str
+    source: str
+    calendar_identifier: str
+    allows_content_modifications: bool
+
+
+class CalendarInfoListResponse(BaseModel):
+    """Model for a detailed, source-qualified list of calendars"""
+    calendars: List[CalendarInfo]
     count: int = Field(..., description="Number of calendars")
 
 

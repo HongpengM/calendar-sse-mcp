@@ -1,5 +1,5 @@
 """
-Date utilities for calendar-sse-mcp using dateparser and pydantic v2
+Date utilities for calendar-http-mcp using dateparser and pydantic v2
 """
 from datetime import datetime, timedelta
 from typing import Optional, Union, Tuple, Dict, Any

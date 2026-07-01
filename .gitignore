@@ -46,3 +46,13 @@ temp/
 
 # Scripts
 scripts/
+
+# Personal / AI config
+CLAUDE_CONFIG.txt
+claude-desktop-config.json
+mcp-client-config*.json
+
+# Personal notes / reference
+learning-records/
+lessons/
+reference/

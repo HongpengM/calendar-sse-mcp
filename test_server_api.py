@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Complete test script for server API search functionality with SSE response handling
+Complete test script for server API search functionality with http response handling
 """
 import json
 import requests
@@ -11,7 +11,7 @@ import uuid
 import sys
 
 def listen_for_responses(session_id, base_url, results):
-    """Listen for SSE responses and store them in results dict"""
+    """Listen for http responses and store them in results dict"""
     try:
         sse_url = f"{base_url}/sse"
         response = requests.get(sse_url, stream=True, headers={
@@ -27,14 +27,14 @@ def listen_for_responses(session_id, base_url, results):
                     request_id = data.get("id")
                     if request_id:
                         results[request_id] = data
-                        print(f"[SSE] Received response for request {request_id}")
+                        print(f"[http] Received response for request {request_id}")
                 except json.JSONDecodeError:
                     pass
     except Exception as e:
-        print(f"[SSE] Error: {e}")
+        print(f"[http] Error: {e}")
 
 def test_server_search_api():
-    """Test search API via MCP server with proper SSE handling"""
+    """Test search API via MCP server with proper http handling"""
     
     print("=" * 70)
     print("TESTING SERVER API SEARCH (DEV PORT 27013)")
@@ -51,7 +51,7 @@ def test_server_search_api():
         }, timeout=5)
         
         if sse_response.status_code != 200:
-            print(f"Error: SSE endpoint returned {sse_response.status_code}")
+            print(f"Error: http endpoint returned {sse_response.status_code}")
             return
             
         client = sseclient.SSEClient(sse_response)
@@ -77,8 +77,8 @@ def test_server_search_api():
         print(f"Error getting session ID: {e}")
         return
     
-    # Step 2: Start SSE listener in background
-    print("\nStep 2: Starting SSE listener...")
+    # Step 2: Start http listener in background
+    print("\nStep 2: Starting http listener...")
     listener_thread = threading.Thread(
         target=listen_for_responses, 
         args=(session_id, base_url, results),

@@ -1,125 +1,107 @@
-# Date Handling in Calendar SSE MCP
+# Date Handling in calendar-http-mcp
 
-This document explains how dates are handled in the Calendar SSE MCP using the dateparser library and Pydantic v2.
+This document explains how dates are handled in the calendar-http-mcp using the dateparser library and Pydantic v2.
 
-## Dateparser Integration
+## Overview
 
-The Calendar SSE MCP uses the [dateparser](https://dateparser.readthedocs.io/en/latest/) library to provide flexible date parsing capabilities. This allows users to input dates in a variety of formats, including:
+The calendar-http-mcp uses the [dateparser](https://dateparser.readthedocs.io/en/latest/) library to provide flexible date parsing capabilities. This allows users to input dates in a variety of formats, including:
 
-- ISO 8601 format (`YYYY-MM-DD`, `YYYY-MM-DDTHH:MM:SS`)
-- Natural language dates ("tomorrow", "next week", "in 3 days")
-- Various date formats (US, European, etc.)
-- Relative dates with specific times ("tomorrow at 3pm")
+- Natural language ("tomorrow", "next week", "in 3 days")
+- Standard formats ("2023-05-15", "15/05/2023", "May 15, 2023")
+- Relative dates ("3 days ago", "yesterday", "today")
 
-### Example Date Formats
+## Supported Date Formats
 
-The following date formats are supported:
+### ISO Format
 
-| Input | Interpretation |
-|-------|----------------|
-| `2023-12-25` | December 25, 2023 (00:00:00) |
-| `25/12/2023` | December 25, 2023 (00:00:00) |
-| `12/25/2023` | December 25, 2023 (00:00:00) |
-| `Dec 25, 2023` | December 25, 2023 (00:00:00) |
-| `tomorrow` | Next day (00:00:00) |
-| `tomorrow at 3pm` | Next day (15:00:00) |
-| `next Monday` | Next Monday (00:00:00) |
-| `in 2 days` | 2 days from now |
-| `yesterday` | Previous day (00:00:00) |
-| `now` | Current date and time |
+- `2023-05-15` - Date only
+- `2023-05-15T14:30:00` - Date and time
 
-## Pydantic v2 Validation
+### Natural Language
 
-The application uses [Pydantic v2](https://docs.pydantic.dev/latest/) for data validation and parsing. This ensures that all date inputs are properly validated and converted to the correct format.
+- `today`, `tomorrow`, `yesterday`
+- `next Monday`, `last Friday`
+- `in 3 days`, `3 days ago`
+- `next week`, `last month`
 
-### DateRange Model
+### Regional Formats
 
-The `DateRange` model is used to validate date ranges:
+- `05/15/2023` - US format (MM/DD/YYYY)
+- `15/05/2023` - European format (DD/MM/YYYY)
+- `May 15, 2023` - Written format
+- `15 May 2023` - Alternative written format
 
-```python
-class DateRange(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    start_date: datetime
-    end_date: datetime
-    
-    @field_validator('start_date', 'end_date', mode='before')
-    @classmethod
-    def parse_date(cls, value: Union[str, datetime]) -> datetime:
-        """Parse dates using dateparser for flexible input formats"""
-        if isinstance(value, datetime):
-            return value
-        
-        parsed_date = dateparser.parse(value)
-        if not parsed_date:
-            raise ValueError(f"Could not parse date: {value}")
-        return parsed_date
-    
-    @field_validator('end_date')
-    @classmethod
-    def validate_date_range(cls, end_date: datetime, info: Dict[str, Any]) -> datetime:
-        """Validate that end_date is not before start_date"""
-        start_date = info.data.get('start_date')
-        if start_date and end_date < start_date:
-            raise ValueError("End date cannot be before start date")
-        return end_date
+### With Time
+
+- `tomorrow at 3pm`
+- `next Monday at 14:30`
+- `2023-05-15 14:30`
+
+## Date Validation
+
+Dates are validated using Pydantic v2 models to ensure:
+
+1. **Format correctness** - Dates must be parseable
+2. **Logical consistency** - End dates cannot be before start dates
+3. **Type safety** - All dates are converted to Python datetime objects
+
+## Duration Parsing
+
+When searching for events, you can specify durations using flexible formats:
+
+- `3d` or `3 days` - 3 days
+- `1w` or `1 week` - 1 week
+- `2m` or `2 months` - 2 months (approximated as 60 days)
+
+## Implementation Details
+
+The date handling is implemented in two main files:
+
+1. **`date_utils.py`** - Core date parsing and validation functions
+2. **`models.py`** - Pydantic models with date validators
+
+### Key Functions
+
+- `parse_date_string()` - Parse a single date string
+- `create_date_range()` - Create a validated date range
+- `format_iso()` - Format a datetime as ISO 8601 string
+
+### Error Handling
+
+When dates cannot be parsed, the system raises `ValueError` with descriptive messages. These are caught and returned as JSON error responses in the API.
+
+## Examples
+
+### CLI Usage
+
+```bash
+# Create an event for tomorrow
+calendar-mcp cli create --event "Meeting" --cal "Work" --date "tomorrow" --start "10:00"
+
+# Search for events in the next week
+calendar-mcp cli search "project" --duration "1 week"
+
+# Get events from next Monday to next Friday
+calendar-mcp cli events "Work" --start-date "next Monday" --end-date "next Friday"
 ```
 
-This model:
-1. Accepts both string and datetime objects
-2. Uses dateparser to parse string dates
-3. Validates that the end date is not before the start date
-4. Returns properly formatted datetime objects
+### API Usage
 
-### Date Utility Functions
+Dates can be passed to API endpoints in any supported format:
 
-The following utility functions simplify date handling in the application:
-
-- `parse_date_string(date_str)`: Parse a single date string using dateparser
-- `create_date_range(start_date, end_date, days)`: Create a validated date range with proper defaults
-- `format_iso(dt)`: Format a datetime as an ISO 8601 string
-
-## Usage in API Endpoints
-
-The JSON API endpoints use these date handling capabilities to provide a flexible interface:
-
-```python
-@mcp.resource("api/events/{calendar_name}")
-def api_get_events(calendar_name: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> str:
-    """
-    API endpoint to get events from a calendar with JSON response
-    
-    Args:
-        calendar_name: The name of the calendar
-        start_date: Optional start date in any format parseable by dateparser
-        end_date: Optional end date in any format parseable by dateparser
-        
-    Returns:
-        JSON response with events
-    """
-    try:
-        # Parse and validate date range
-        start_dt, end_dt = create_date_range(start_date, end_date)
-        
-        # Format dates as ISO strings for the calendar store
-        start_iso = format_iso(start_dt)
-        end_iso = format_iso(end_dt)
-        
-        # ...
+```
+api://events/Work/next%20Monday/next%20Friday
 ```
 
-## Default Behavior
+The URL-encoded date strings are parsed on the server side.
 
-When dates are not specified:
+## Time Zone Handling
 
-- Default start date is today (00:00:00)
-- Default end date is 7 days from the start date
-- All times are in the local timezone unless specified otherwise
+Currently, all dates are handled in the local system time zone. Future versions may add support for explicit time zone handling.
 
-## Error Handling
+## Best Practices
 
-When date parsing fails:
-
-1. A clear error message is returned, including the unparseable date string
-2. The error is wrapped in the API response for proper client handling
-3. The error message will indicate if the issue was with the date format or range validation 
+1. **Use ISO format for scripts** - When writing scripts, use `YYYY-MM-DD` format for reliability
+2. **Use natural language for CLI** - When using the CLI interactively, natural language is more convenient
+3. **Be specific with times** - Always include a time component when creating events to avoid ambiguity
+4. **Check date parsing** - If a date isn't being parsed as expected, try a more explicit format

@@ -1,5 +1,5 @@
 """
-Calendar SSE MCP - A Model Context Protocol server for macOS Calendar.app
+calendar-http-mcp - A Model Context Protocol server for macOS Calendar.app
 """
 
 from .date_utils import parse_date_string, create_date_range, format_iso

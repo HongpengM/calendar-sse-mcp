@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Improved test script for the Calendar MCP Server that listens for SSE responses
+Improved test script for the Calendar MCP Server that listens for http responses
 """
 import json
 import requests
@@ -22,7 +22,7 @@ def get_base_url(port):
     return f"http://localhost:{port}"
 
 def listen_for_sse_events(listener_session_id, base_url):
-    """Listen for SSE events continuously and print responses"""
+    """Listen for http events continuously and print responses"""
     print(f"Starting SSE listener for session {listener_session_id}...")
     
     sse_url = f"{base_url}/sse"
@@ -31,7 +31,7 @@ def listen_for_sse_events(listener_session_id, base_url):
     })
     
     if response.status_code != 200:
-        print(f"Error connecting to SSE endpoint: {response.status_code}")
+        print(f"Error connecting to http endpoint: {response.status_code}")
         return
     
     client = sseclient.SSEClient(response)
@@ -42,7 +42,7 @@ def listen_for_sse_events(listener_session_id, base_url):
         elif event.event == "message":
             try:
                 data = json.loads(event.data)
-                print("\n=== Received SSE Message ===")
+                print("\n=== Received http Message ===")
                 pprint(data)
                 print("===========================\n")
             except json.JSONDecodeError:
@@ -71,7 +71,7 @@ def main():
         print(f"Error connecting to SSE endpoint: {response.status_code}")
         return
     
-    # Create SSE client
+    # Create http client
     client = sseclient.SSEClient(response)
     
     # Step 2: Get the messages endpoint from the first event
@@ -92,7 +92,7 @@ def main():
         print("Failed to extract session ID from endpoint URL")
         return
     
-    # Start a background thread to listen for SSE events on a new connection
+    # Start a background thread to listen for http events on a new connection
     sse_thread = threading.Thread(target=listen_for_sse_events, args=(session_id, base_url))
     sse_thread.daemon = True
     sse_thread.start()

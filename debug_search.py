@@ -29,18 +29,18 @@ def debug_server_search():
     # Connect to dev server
     base_url = "http://localhost:27013"
     
-    print("Step 1: Connecting to SSE endpoint...")
+    print("Step 1: Connecting to http endpoint...")
     try:
-        # Connect to SSE endpoint
+        # Connect to http endpoint
         sse_response = requests.get(f"{base_url}/sse", stream=True, headers={
             "Accept": "text/event-stream"
         }, timeout=5)
         
         if sse_response.status_code != 200:
-            print(f"Error connecting to SSE endpoint: {sse_response.status_code}")
+            print(f"Error connecting to http endpoint: {sse_response.status_code}")
             return
             
-        # Read the SSE stream to get the endpoint with session ID
+        # Read the http stream to get the endpoint with session ID
         import sseclient
         client = sseclient.SSEClient(sse_response)
         
@@ -99,7 +99,7 @@ def debug_server_search():
                 print(f"Response text: {response.text}")
         else:
             print("Response: Accepted (async processing)")
-            print("Note: For async responses, check server logs or use SSE listener")
+            print("Note: For async responses, check server logs or use http listener")
             
     except Exception as e:
         print(f"Error making request: {e}")
